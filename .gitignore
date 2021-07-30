@@ -1,0 +1,8 @@
+**/node_modules
+hardhat/artifacts
+hardhat/deployments
+hardhat/cache
+hardhat/mnemonic.txt
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
