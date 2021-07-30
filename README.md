@@ -13,3 +13,5 @@
 Others:
 - you should put etherscan (for verified contracts) api into hardhat.config.js
 
+For better representation, you should check our concept:
+![1000Blocks space concept](/Concept.svg)
