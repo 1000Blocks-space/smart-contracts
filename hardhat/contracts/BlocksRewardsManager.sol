@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "./BlocksStaking.sol";
 
 
 contract BlocksRewardsManager is Ownable {
@@ -23,6 +24,7 @@ contract BlocksRewardsManager is Ownable {
     }
 
     IERC20 public blsToken;
+    BlocksStaking public blocksStaking;
     SpaceInfo[] public spaceInfo;
     mapping(uint256 => mapping(address => UserInfo)) public userInfo;
     mapping(address => bool) public spacesByAddress;
@@ -36,8 +38,9 @@ contract BlocksRewardsManager is Ownable {
         _;
     }
 
-    constructor(IERC20 _blsAddress){
+    constructor(IERC20 _blsAddress, address _blocksStakingAddress){
         blsToken = IERC20(_blsAddress);
+        blocksStaking = BlocksStaking(_blocksStakingAddress);
     }
 
     function spacesLength() external view returns (uint256){
@@ -110,6 +113,7 @@ contract BlocksRewardsManager is Ownable {
         // We have how many blocks does a specific user (address has). 
         // And we know how many are all of blocks in space bought.
         // console.log("Money received:", msg.value);
+        blocksStaking.distribute{value: msg.value}();
     }
 
     function claim(uint256 _spaceId) public {
@@ -153,39 +157,5 @@ contract BlocksRewardsManager is Ownable {
         uint256 blsBalance = blsToken.balanceOf(address(this));       
         blsToken.transfer(msg.sender, blsBalance);
     }
-
-//   address payable public treasury;
-//   uint constant MAX_TREASURY_FEE = 15; //%
-//   uint public treasuryFee = 10; // %
-
-//   function setTreasuryFee(uint256 newFee_) external onlyOwner {
-//     require(newFee_ < MAX_TREASURY_FEE);
-//     treasuryFee = newFee_;
-//   }
-
-//   function updateTreasuryWallet(address newWallet_) external onlyOwner {
-//     treasury = payable(newWallet_);
-//   }
-
-      // function rewardOf(address userAddress) external view returns (uint){
-  //   return users[userAddress].pendingReward;
-  // }
-
-  // function claimReward() external {
-
-  //   uint userBalanceToGrant = users[msg.sender].pendingReward;
-  //   require(userBalanceToGrant > 0, "Nothing to withraw.");
-  //   users[msg.sender].pendingReward = 0;
-  //   (bool success, ) = payable(msg.sender).call{value: userBalanceToGrant}("");
-  //   require(success, "Claiming rewards failed.");
-  //   emit RewardClaimed(msg.sender, userBalanceToGrant);
-  // }
-
-  // TODO: This shall be removed after testnet. If you see this, contact devs immediately
-  // function withdrawTestOnly() external onlyOwner{
-  //   uint contractBalance = address(this).balance;
-  //   (bool success, ) = owner.call{value: contractBalance}("");
-  //   require(success, "Transfer failed.");
-  // }
 
 }

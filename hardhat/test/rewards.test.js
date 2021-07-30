@@ -9,13 +9,16 @@ describe("Testing BlocksRewardsManager", function() {
   const BLS_5_PER_BLOCK = 5;
   let blsContract;
   let rewardsManagerContract;
+  let blocksStaking;
   let blocksSpaceContract;
   
   async function setup() {
     const contractObject = await ethers.getContractFactory("BLSToken");
     blsContract = await contractObject.deploy();
+    const blocksStakingObject = await ethers.getContractFactory("BlocksStaking");
+    blocksStaking = await blocksStakingObject.deploy(blsContract.address);
     const contractObject2 = await ethers.getContractFactory("BlocksRewardsManager");
-    rewardsManagerContract = await contractObject2.deploy(blsContract.address);
+    rewardsManagerContract = await contractObject2.deploy(blsContract.address, blocksStaking.address);
     const contractObject3 = await ethers.getContractFactory("BlocksSpace");
     blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address);
     await rewardsManagerContract.addSpace(blocksSpaceContract.address, BLS_5_PER_BLOCK);
