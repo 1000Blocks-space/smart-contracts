@@ -19,7 +19,7 @@ describe("Testing BlocksSpace", function() {
     const contractObject2 = await ethers.getContractFactory("BlocksRewardsManager");
     rewardsManagerContract = await contractObject2.deploy(blsContract.address, blocksStaking.address, owner.address);
     const contractObject3 = await ethers.getContractFactory("BlocksSpace");
-    blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address);
+    blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address, 0);
     await rewardsManagerContract.addSpace(blocksSpaceContract.address, 5);
     await blsContract.transfer(rewardsManagerContract.address, 1000);
   }
@@ -53,39 +53,39 @@ describe("Testing BlocksSpace", function() {
     });
     
     it("Simple purchase of poster", async function() {
-      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0502", "0502", "imagehash1", "https://1000block.space", {value: 1});
+      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0502", "0502", "imagehash1", {value: 1});
     });
 
     it("Simple purchase without money", async function() {
-      await expect(blocksSpaceContract.connect(walletB).purchaseBlocksArea("0502", "0502", "imagehash1", "https://1000block.space", {value: 0})).to.be.reverted;
+      await expect(blocksSpaceContract.connect(walletB).purchaseBlocksArea("0502", "0502", "imagehash1", {value: 0})).to.be.reverted;
     });
     
     it("Want to overtake block, but with same amount of money as previous", async function() {
-      await expect(blocksSpaceContract.connect(walletB).purchaseBlocksArea("0502", "0502", "imagehash1", "https://1000block.space", {value: 1})).to.be.reverted;
+      await expect(blocksSpaceContract.connect(walletB).purchaseBlocksArea("0502", "0502", "imagehash1", {value: 1})).to.be.reverted;
     });
 
     it("Overtaking single block, now paying more money", async function() {
-      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0502", "0502", "imagehash2", "https://1000block.space", {value: 2});
+      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0502", "0502", "imagehash2", {value: 2});
     });
 
     it("Purchasing 3 x 3 blocks, but price increase per block too small", async function() {
-      await expect(blocksSpaceContract.connect(walletC).purchaseBlocksArea("0505", "0707", "imagehash2", "https://1000block.space", {value: 2})).to.be.revertedWith("Price increase too small");
+      await expect(blocksSpaceContract.connect(walletC).purchaseBlocksArea("0505", "0707", "imagehash2", {value: 2})).to.be.revertedWith("Price increase too small");
     });
     
     it("Purchasing 3 x 3 blocks, paying at least 1 / block more.", async function() {
-      await blocksSpaceContract.connect(walletC).purchaseBlocksArea("0505", "0707", "imagehash2", "https://1000block.space", {value: 9});
+      await blocksSpaceContract.connect(walletC).purchaseBlocksArea("0505", "0707", "imagehash2", {value: 9});
     });
     
     it("Purchasing 7 x 7 blocks, which is too big.", async function() {
-      await expect(blocksSpaceContract.connect(walletD).purchaseBlocksArea("0707", "1313", "imagehash2", "https://1000block.space", {value: 50})).to.be.revertedWith("BlocksArea invalid");
+      await expect(blocksSpaceContract.connect(walletD).purchaseBlocksArea("0707", "1313", "imagehash2", {value: 50})).to.be.revertedWith("BlocksArea invalid");
     });
 
     it("Purchasing 6 x 7 blocks, which is biggest possible blocksarea.", async function() {
-      await blocksSpaceContract.connect(walletD).purchaseBlocksArea("0707", "1213", "imagehash2", "https://1000block.space", {value: 50});
+      await blocksSpaceContract.connect(walletD).purchaseBlocksArea("0707", "1213", "imagehash2", {value: 50});
     });
     
     it("Purchasing 1 x 7 blocks, which is stretched blocksarea.", async function() {
-      await blocksSpaceContract.connect(walletE).purchaseBlocksArea("1314", "1914", "imagehash2", "https://1000block.space", {value: 7});
+      await blocksSpaceContract.connect(walletE).purchaseBlocksArea("1314", "1914", "imagehash2", {value: 7});
     });
 
   });
@@ -98,15 +98,15 @@ describe("Testing BlocksSpace", function() {
 
     it("Same wallet cannot purchase 2 blockareas immediately", async function() {
       await setup();
-      await blocksSpaceContract.purchaseBlocksArea("0502", "0502", "imagehash1", "https://1000block.space", {value: 1});
-      await expect(blocksSpaceContract.purchaseBlocksArea("0502", "0502", "imagehash1", "https://1000block.space", {value: 10})).to.be.reverted;
+      await blocksSpaceContract.purchaseBlocksArea("0502", "0502", "imagehash1", {value: 1});
+      await expect(blocksSpaceContract.purchaseBlocksArea("0502", "0502", "imagehash1", {value: 10})).to.be.reverted;
     });
 
     it("Same wallet purchase 2 blockareas with span inbetween 42h", async function() {
       await setup();
-      await blocksSpaceContract.purchaseBlocksArea("0502", "0502", "imagehash1", "https://1000block.space", {value: 1});
+      await blocksSpaceContract.purchaseBlocksArea("0502", "0502", "imagehash1", {value: 1});
       await mineBlockAndMoveTimestamp(42 * 60 * 60 + 60); //+60s for error
-      await blocksSpaceContract.purchaseBlocksArea("0502", "0502", "imagehash1", "https://1000block.space", {value: 10});
+      await blocksSpaceContract.purchaseBlocksArea("0502", "0502", "imagehash1", {value: 10});
     });   
   });
 
@@ -164,7 +164,7 @@ describe("Testing BlocksSpace", function() {
 
     it("Initial purchase of blocksarea", async function () {
       await setup();
-      await blocksSpaceContract.purchaseBlocksArea("0705", "0807", "hellohash", "https://1000block.space", {value: 100});
+      await blocksSpaceContract.purchaseBlocksArea("0705", "0807", "hellohash", {value: 100});
       let userInfo = await blocksSpaceContract.users(owner.address);
       expect(userInfo.lastBlocksAreaBought.imghash, "Image hash needs to equal to last poster").to.equal("hellohash");
       expect(userInfo.lastBlocksAreaBought.blockend, "Block end needs to be 0807").to.equal("0807");
@@ -172,9 +172,9 @@ describe("Testing BlocksSpace", function() {
 
     it("User purchase another blocksarea", async function () {
       await setup();
-      await blocksSpaceContract.purchaseBlocksArea("0705", "0807", "hellohash", "https://1000block.space", {value: 100});
+      await blocksSpaceContract.purchaseBlocksArea("0705", "0807", "hellohash", {value: 100});
       await mineBlockAndMoveTimestamp(42 * 60 * 60); // So user can purchase again
-      await blocksSpaceContract.purchaseBlocksArea("0909", "0909", "image09", "https://1000block.space", {value: 200});
+      await blocksSpaceContract.purchaseBlocksArea("0909", "0909", "image09", {value: 200});
       let userInfo = await blocksSpaceContract.users(owner.address);
       expect(userInfo.lastBlocksAreaBought.imghash, "Image hash needs to equal to last poster").to.equal("image09");
       expect(userInfo.lastBlocksAreaBought.blockend, "Block end needs to be 0807").to.equal("0909");

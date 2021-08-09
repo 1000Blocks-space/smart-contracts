@@ -21,7 +21,6 @@ contract BlocksSpace is Ownable {
         uint256 blockstart;
         uint256 blockend;
         string imghash;
-        string text;
         uint256 zindex;
     }
 
@@ -38,7 +37,7 @@ contract BlocksSpace is Ownable {
     }
 
     uint256 constant PRICE_OF_LOGO_BLOCKS = 42 ether;
-
+    uint256 public immutable spaceId;
     BlocksRewardsManager public rewardsPool;
     uint256 public minTimeBetweenPurchases = 42 hours;
     mapping(uint256 => Block) public blocks;
@@ -46,17 +45,10 @@ contract BlocksSpace is Ownable {
 
     event BlocksAreaPurchased(address indexed blocksAreaOwner, uint256 startBlock, uint256 endBlock);
 
-    function updateRewardsPoolContract(address add_) external onlyOwner {
-        rewardsPool = BlocksRewardsManager(add_);
-    }
-
-    function updateMinTimeBetweenPurchases(uint256 inSeconds_) external onlyOwner {
-        minTimeBetweenPurchases = inSeconds_;
-    }
-
-    constructor(address rewardsPoolContract_) {
+    constructor(address rewardsPoolContract_, uint256 spaceId_) {
         rewardsPool = BlocksRewardsManager(rewardsPoolContract_);
         setPriceOfLogoBlocks(0, 301);
+        spaceId = spaceId_;
     }
 
     function setPriceOfLogoBlocks(uint256 startBlockId_, uint256 endBlockId_) internal {
@@ -76,8 +68,7 @@ contract BlocksSpace is Ownable {
     function purchaseBlocksArea(
         uint256 startBlockId_,
         uint256 endBlockId_,
-        string calldata imghash_,
-        string calldata text_
+        string calldata imghash_
     ) external payable {
         BlockAreaLocation memory areaLoc = BlockAreaLocation(
             startBlockId_ / 100,
@@ -91,7 +82,7 @@ contract BlocksSpace is Ownable {
         require(paymentReceived > 0, "Money expected...");
         require(
             block.timestamp >= users[msg.sender].lastPurchase + minTimeBetweenPurchases,
-            "You must wait 42h between buys"
+            "You must wait between buys"
         );
         require(isBlocksAreaValid(areaLoc), "BlocksArea invalid");
         require(bytes(imghash_).length != 0, "Image hash cannot be empty");
@@ -108,12 +99,12 @@ contract BlocksSpace is Ownable {
             priceIncreasePerBlock_,
             numberOfBlocks
         );
-        updateUserState(msg.sender, startBlockId_, endBlockId_, imghash_, text_);
+        updateUserState(msg.sender, startBlockId_, endBlockId_, imghash_);
 
         // 3. Transactions
         // Send fresh info to RewardsPool contract, so buyer gets some sweet rewards
         rewardsPool.blocksAreaBoughtOnSpace{value: paymentReceived}(
-            0,
+            spaceId,
             msg.sender,
             previousBlockOwners,
             previousOwnersPrices
@@ -131,7 +122,7 @@ contract BlocksSpace is Ownable {
         // Go through all blocks that were paid for
         address[] memory previousBlockOwners = new address[](numberOfBlocks_);
         uint256[] memory previousOwnersPrices = new uint256[](numberOfBlocks_);
-        uint256 arrayIndex = 0;
+        uint256 arrayIndex;
         for (uint256 i = areaLoc.startBlockX; i <= areaLoc.endBlockX; ++i) {
             for (uint256 j = areaLoc.startBlockY; j <= areaLoc.endBlockY; ++j) {
                 //Set new state of the Block
@@ -150,15 +141,13 @@ contract BlocksSpace is Ownable {
         address user_,
         uint256 startBlockId_,
         uint256 endBlockId_,
-        string calldata imghash_,
-        string calldata text_
+        string calldata imghash_
     ) internal {
         UserState storage userState = users[user_];
         userState.lastBlocksAreaBought.owner = user_;
         userState.lastBlocksAreaBought.blockstart = startBlockId_;
         userState.lastBlocksAreaBought.blockend = endBlockId_;
         userState.lastBlocksAreaBought.imghash = imghash_;
-        userState.lastBlocksAreaBought.text = text_;
         userState.lastBlocksAreaBought.zindex = block.number;
         userState.lastPurchase = block.timestamp;
     }
@@ -217,5 +206,13 @@ contract BlocksSpace is Ownable {
         uint256 blockArea = blockWidth * blockHeight;
 
         return blockWidth <= 7 && blockHeight <= 7 && blockArea <= 42;
+    }
+
+    function updateRewardsPoolContract(address add_) external onlyOwner {
+        rewardsPool = BlocksRewardsManager(add_);
+    }
+
+    function updateMinTimeBetweenPurchases(uint256 inSeconds_) external onlyOwner {
+        minTimeBetweenPurchases = inSeconds_;
     }
 }

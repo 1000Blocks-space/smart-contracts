@@ -1,7 +1,6 @@
 pragma solidity ^0.8.0;
 //SPDX-License-Identifier: MIT
 
-import "hardhat/console.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -26,9 +25,9 @@ contract BlocksStaking is Ownable {
     // Global staking variables
     uint256 public totalTokens; // Total amount of amount currently staked
     uint256 public rewardsPerBlock; // Multiplied by 1e12 for better division precision
+    uint256 public rewardsFinishedBlock; // When will rewards distribution end
     uint256 accRewardsPerShare; // Accumulated rewards per share
     uint256 lastRewardCalculatedBlock; // Last time we calculated accumulation of rewards per share
-    uint256 rewardsFinishedBlock; // When will rewards distribution end
     uint256 allUsersRewardDebt; // Helper to keep track of proper account balance for distribution
     uint256 takeoverRewards; // Helper to keep track of proper account balance for distribution
 
@@ -62,6 +61,15 @@ contract BlocksStaking is Ownable {
             tempAccRewardsPerShare = tempAccRewardsPerShare + (rewardsPerBlock * getMultiplier()) / totalTokens;
         }
         return ((tempAccRewardsPerShare * user.amount) / 1e12) + user.takeoverReward - user.rewardDebt;
+    }
+
+    // View function for showing rewards counter on frontend. Its multiplied by 1e12
+    function rewardsPerBlockPerToken() external view returns(uint256) {
+        if (block.number > rewardsFinishedBlock || totalTokens <= 0) {
+            return 0;
+        } else {
+            return rewardsPerBlock / totalTokens;
+        }
     }
 
     function getMultiplier() internal view returns (uint256) {
@@ -162,10 +170,7 @@ contract BlocksStaking is Ownable {
 
     function calculateRewardsDistribution() internal {
         uint256 allReservedRewards = (accRewardsPerShare * totalTokens) / 1e12;
-        uint256 availableForDistribution = (address(this).balance +
-            allUsersRewardDebt -
-            allReservedRewards -
-            takeoverRewards);
+        uint256 availableForDistribution = (address(this).balance + allUsersRewardDebt - allReservedRewards - takeoverRewards);
         rewardsPerBlock = (availableForDistribution * 1e12) / rewardsDistributionPeriod;
         rewardsFinishedBlock = block.number + rewardsDistributionPeriod;
     }

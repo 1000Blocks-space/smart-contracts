@@ -28,7 +28,7 @@ describe("Testing BlocksRewardsManager", function() {
     const contractObject2 = await ethers.getContractFactory("BlocksRewardsManager");
     rewardsManagerContract = await contractObject2.deploy(blsContract.address, blocksStaking.address, owner.address);
     const contractObject3 = await ethers.getContractFactory("BlocksSpace");
-    blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address);
+    blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address, 0);
     await rewardsManagerContract.addSpace(blocksSpaceContract.address, blsPerBlock);
     await blsContract.transfer(rewardsManagerContract.address, amountOfBls);
   }
@@ -53,7 +53,7 @@ describe("Testing BlocksRewardsManager", function() {
 
     it("Purchase 1 block.area", async function() {
       await setup();
-      await blocksSpaceContract.connect(owner).purchaseBlocksArea("0402", "0402", "imagehash1", "https://1000block.space", {value: 1});
+      await blocksSpaceContract.connect(owner).purchaseBlocksArea("0402", "0402", "imagehash1", {value: 1});
       await mineBlocks(4);
       let pendingTokens = await rewardsManagerContract.pendingBlsTokens(0, owner.address);
       expect(pendingTokens).to.equal(BLS_5_PER_BLOCK * 4);
@@ -65,14 +65,14 @@ describe("Testing BlocksRewardsManager", function() {
     it("Rewards of 2 purchases of non overlapping block.areas", async function() {
       await setup();
       // purchase 1 block.area
-      await blocksSpaceContract.connect(owner).purchaseBlocksArea("0402", "0402", "imagehash1", "https://1000block.space", {value: 1});
+      await blocksSpaceContract.connect(owner).purchaseBlocksArea("0402", "0402", "imagehash1", {value: 1});
       // 1 transaction
       await mineBlocks(1);
       let pendingTokens = await rewardsManagerContract.pendingBlsTokens(0, owner.address);
       expect(pendingTokens).to.equal(BLS_5_PER_BLOCK * 1);
 
       // 1 transaction // purchase 9 block.area
-      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("1212", "1414", "imagehash2", "https://1000block.space", {value: 10});
+      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("1212", "1414", "imagehash2", {value: 10});
       
       // // 3 transactions
       await mineBlocks(3);
@@ -86,14 +86,14 @@ describe("Testing BlocksRewardsManager", function() {
     it("Rewards of complete take over of blockareas (second user buys all from first user)", async function() {
       await setup();
       // Owner purchases 9 block.areas
-      await blocksSpaceContract.connect(owner).purchaseBlocksArea("1212", "1414", "imagehash1", "https://1000block.space", {value: 10});
+      await blocksSpaceContract.connect(owner).purchaseBlocksArea("1212", "1414", "imagehash1", {value: 10});
       // 2 transactions
       await mineBlocks(2);
       let pendingTokens = await rewardsManagerContract.pendingBlsTokens(0, owner.address);
       expect(pendingTokens, "Owner needs to have 2 blocks x BLS_PER_BLOCK * 9 blocks rewards").to.equal(BLS_5_PER_BLOCK * 2 * 9);
 
       // 1 transaction // Wallet A purchases all owners block.areas for higher price
-      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("1212", "1414", "imagehash2", "https://1000block.space", {value: 200});
+      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("1212", "1414", "imagehash2", {value: 200});
       
       pendingTokens = await rewardsManagerContract.pendingBlsTokens(0, owner.address);
       expect(pendingTokens, "Owners rewards are now finalized after 3 transactions.").to.equal(BLS_5_PER_BLOCK * 3 * 9);
@@ -111,14 +111,14 @@ describe("Testing BlocksRewardsManager", function() {
     it("Rewards when user 2 partially takes over blockareas of user 1", async function() {
       await setup();
       // Owner purchases 10 block.areas
-      await blocksSpaceContract.connect(owner).purchaseBlocksArea("1212", "1316", "imagehash1", "https://1000block.space", {value: 10});
+      await blocksSpaceContract.connect(owner).purchaseBlocksArea("1212", "1316", "imagehash1", {value: 10});
       // 2 transactions
       await mineBlocks(2);
       let pendingTokens = await rewardsManagerContract.pendingBlsTokens(0, owner.address);
       expect(pendingTokens, "Owner rewards are 2 blocks x BLS_5_PER_BLOCK * 10 blocks").to.equal(BLS_5_PER_BLOCK * 2 * 10);
 
       // 1 transaction // Wallet A purchases 6 of owners block.areas for higher price
-      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("1212", "1314", "imagehash2", "https://1000block.space", {value: 40});
+      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("1212", "1314", "imagehash2", {value: 40});
       
       // mine 2 additional transactions
       await mineBlocks(2);
@@ -146,7 +146,7 @@ describe("Testing BlocksRewardsManager", function() {
       await blocksStaking.connect(walletB).deposit(1);
 
       let balanceBefore = await ethers.provider.getBalance(owner.address);
-      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("1212", "1316", "imagehash1", "https://1000block.space", {value: utils.parseEther("100")});
+      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("1212", "1316", "imagehash1", {value: utils.parseEther("100")});
       let balanceAfter = await ethers.provider.getBalance(owner.address);
       let diff = utils.formatEther(balanceAfter.sub(balanceBefore));
       expect(diff, "It needs to be 5 ether more in treasury").to.equal("15.0");
@@ -159,7 +159,7 @@ describe("Testing BlocksRewardsManager", function() {
     it("Setting treasury fee to zero", async function() {
       await rewardsManagerContract.connect(owner).setTreasuryFee(0);
       let balanceBefore = await ethers.provider.getBalance(owner.address);
-      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0402", "0402", "imagehash1", "https://1000block.space", {value: utils.parseEther("5")});
+      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0402", "0402", "imagehash1", {value: utils.parseEther("5")});
       let balanceAfter = await ethers.provider.getBalance(owner.address);
       let diff = utils.formatEther(balanceAfter.sub(balanceBefore));
       expect(diff, "Treasury should not change").to.equal("0.5"); //Because liqudiity fees are still applied
@@ -176,11 +176,11 @@ describe("Testing BlocksRewardsManager", function() {
     it("User takes over half of previous users blocks", async function() {
       await setup();
       // A Purchase 4 blocks
-      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0706", "0807", "imagehash1", "https://1000block.space", {value: 10});
+      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0706", "0807", "imagehash1", {value: 10});
       let walletAUserInfo = await rewardsManagerContract.userInfo(0, walletA.address);
       expect(walletAUserInfo.amount.toNumber(), "User A should have 4 blocks now").to.equal(4);
       // User B Purchases 2 blocks of user A
-      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0806", "0807", "imagehash1", "https://1000block.space", {value: 10});
+      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0806", "0807", "imagehash1", {value: 10});
       walletAUserInfo = await rewardsManagerContract.userInfo(0, walletA.address);
       expect(walletAUserInfo.amount.toNumber(), "User A should have only 2 blocks now").to.equal(2);
       let walletBUserInfo = await rewardsManagerContract.userInfo(0, walletB.address);
@@ -190,11 +190,11 @@ describe("Testing BlocksRewardsManager", function() {
     it("User buys 42 blocks and takes over ALL (4) of previous users blocks", async function() {
       await setup();
       // A Purchase 4 blocks
-      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0706", "0807", "imagehash1", "https://1000block.space", {value: 10});
+      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0706", "0807", "imagehash1", {value: 10});
       let walletAUserInfo = await rewardsManagerContract.userInfo(0, walletA.address);
       expect(walletAUserInfo.amount.toNumber(), "User A should have 4 blocks now").to.equal(4);
       // User B Purchases 42 blocks and takes over all of users A blocks
-      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0706", "1311", "imagehash1", "https://1000block.space", {value: 100});
+      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0706", "1311", "imagehash1", {value: 100});
       walletAUserInfo = await rewardsManagerContract.userInfo(0, walletA.address);
       expect(walletAUserInfo.amount.toNumber(), "User A should have 0 blocks").to.equal(0);
       let walletBUserInfo = await rewardsManagerContract.userInfo(0, walletB.address);
@@ -214,7 +214,7 @@ describe("Testing BlocksRewardsManager", function() {
 
     //   let blsBalanceInitial = await blsContract.balanceOf(walletA.address);
     //   // A Purchase 4 blocks
-    //   await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0706", "0807", "imagehash1", "https://1000block.space", {value: 10});
+    //   await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0706", "0807", "imagehash1", {value: 10});
     //   await mineBlocks(7);
     //   let pendingTokens = await rewardsManagerContract.pendingBlsTokens(0, walletA.address);
     //   expect(pendingTokens, "Owner needs to have BLS_5_PER_BLOCK * 7 * 4 blocks rewards").to.equal(BLS_5_PER_BLOCK * 7 * 4);
@@ -232,7 +232,7 @@ describe("Testing BlocksRewardsManager", function() {
       let blsBalanceInitial = await blsContract.balanceOf(walletB.address);
 
       // A Purchase 4 blocks
-      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0706", "0807", "imagehash1", "https://1000block.space", {value: 100});
+      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0706", "0807", "imagehash1", {value: 100});
       await mineBlocks(7);
 
       let pendingTokens = await rewardsManagerContract.pendingBlsTokens(0, walletB.address);
@@ -259,7 +259,7 @@ describe("Testing BlocksRewardsManager", function() {
     it("10 bls rewards, which run out and user properly claims and sees no more pending rewards", async function() {
       await setupWithBlsDoposit(10, 1);
       let blsBalanceAfter = await blsContract.balanceOf(rewardsManagerContract.address);
-      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0402", "0402", "imagehash1", "https://1000block.space", {value: 10});
+      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0402", "0402", "imagehash1", {value: 10});
       let block = await ethers.provider.getBlock();
       let blockNr = await rewardsManagerContract.blsRewardsFinishedBlock();
       expect(blockNr.toNumber()-block.number, "This rewards need to hold for 10 blocks").to.equal(10);
@@ -282,11 +282,11 @@ describe("Testing BlocksRewardsManager", function() {
       // 14 BLS stays in contract, because couldnt be divided between all buyers
       await setupWithBlsDoposit(100, 1);
       let initialBlock = await ethers.provider.getBlock();
-      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0402", "0503", "img1", "purhase 4 blocks", {value: 10});
+      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0402", "0503", "img1", {value: 10});
       await mineBlocks(3);
-      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0204", "0405", "img2", "purhase 6 blocks", {value: 10});
+      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0204", "0405", "img2", {value: 10});
       await mineBlocks(2);
-      await blocksSpaceContract.connect(walletC).purchaseBlocksArea("0600", "1001", "img3", "purhase 10 blocks", {value: 10});
+      await blocksSpaceContract.connect(walletC).purchaseBlocksArea("0600", "1001", "img3", {value: 10});
       let blockNr = await rewardsManagerContract.blsRewardsFinishedBlock();
       expect(blockNr.toNumber()-initialBlock.number, "Last reward should be at block 10 after initial buy").to.equal(10);
       await mineBlocks(5); // Push out of last reward
@@ -309,11 +309,11 @@ describe("Testing BlocksRewardsManager", function() {
       // User A needs to get 44, user B 42 and user C 40 before rewards run out.
       await setupWithBlsDoposit(100, 1);
       let initialBlock = await ethers.provider.getBlock();
-      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0402", "0503", "img1", "purhase 4 blocks", {value: 10});
+      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0402", "0503", "img1", {value: 10});
       await mineBlocks(3);
-      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0204", "0405", "img2", "purhase 6 blocks", {value: 10});
+      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0204", "0405", "img2", {value: 10});
       await mineBlocks(2);
-      await blocksSpaceContract.connect(walletC).purchaseBlocksArea("0600", "1001", "img3", "purhase 10 blocks", {value: 10});
+      await blocksSpaceContract.connect(walletC).purchaseBlocksArea("0600", "1001", "img3", {value: 10});
       await blsContract.approve(rewardsManagerContract.address, 26);
       await rewardsManagerContract.depositBlsRewardsForDistribution(26);
       let blockNr = await rewardsManagerContract.blsRewardsFinishedBlock();
@@ -334,7 +334,7 @@ describe("Testing BlocksRewardsManager", function() {
       await setupWithBlsDoposit(0);
       await blsContract.approve(rewardsManagerContract.address, 1000);
       await rewardsManagerContract.depositBlsRewardsForDistribution(1000);
-      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0402", "0503", "img1", "purhase 4 blocks", {value: 10});
+      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0402", "0503", "img1", {value: 10});
       await mineBlocks(3);
       await rewardsManagerContract.connect(walletA).claim(0);
       await expect((await blsContract.balanceOf(walletA.address)).toNumber(), "walletA bls should be 80").to.equal(80);

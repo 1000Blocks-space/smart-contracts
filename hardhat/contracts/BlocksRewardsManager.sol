@@ -9,7 +9,7 @@ import "./BlocksStaking.sol";
 contract BlocksRewardsManager is Ownable {
     // Info of each user.
     struct UserInfo {
-        uint256 amount; // How many block.areas user owns currently.
+        uint256 amount; // How many blocks user owns currently.
         uint256 pendingRewards; // Rewards assigned, but not yet claimed
         uint256 lastRewardCalculatedBlock; // When pending rewards were last calculated for user
     }
@@ -284,17 +284,6 @@ contract BlocksRewardsManager is Ownable {
                 (allBlsPerBlockAreaPerBlock * allAllocationBlocks);
             blsRewardsFinishedBlock = block.number + blocksTillBlsRunOut;
         }
-    }
-
-    // TODO: This shall be removed after testnet. If you see this, contact devs immediately
-    function withdrawTestOnly() external onlyOwner {
-        // Get BNB
-        uint256 contractBalance = address(this).balance;
-        (bool success, ) = msg.sender.call{value: contractBalance}("");
-        require(success, "Transfer failed.");
-        // Get BLS
-        uint256 blsBalance = blsToken.balanceOf(address(this));
-        blsToken.transfer(msg.sender, blsBalance);
     }
 
 }

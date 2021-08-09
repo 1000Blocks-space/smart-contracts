@@ -21,7 +21,7 @@ describe("Testing BlocksStaking", function() {
     const contractObject2 = await ethers.getContractFactory("BlocksRewardsManager");
     rewardsManagerContract = await contractObject2.deploy(blsContract.address, blocksStakingContract.address, owner.address);
     const contractObject3 = await ethers.getContractFactory("BlocksSpace");
-    blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address);
+    blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address, 0);
     await rewardsManagerContract.addSpace(blocksSpaceContract.address, 1);
     await blsContract.transfer(rewardsManagerContract.address, 1000);
   }
@@ -531,6 +531,20 @@ describe("Testing BlocksStaking", function() {
       await expect(blocksStakingContract.distributeRewards([walletA.address],[1100], {value: 1000}), "Should fail because someone wants to manipulate").to.be.reverted;
     });
 
+
+  });
+
+  describe("Scenario: Rewards per block per token", function() {   
+    it("should return rewards per token uint", async function() {
+      await deposit1000Wei();
+      await blsContract.transfer(walletA.address, 90);
+      await blsContract.connect(walletA).approve(blocksStakingContract.address, 90);
+      await blocksStakingContract.setRewardDistributionPeriod(20);
+      await blocksStakingContract.connect(walletA).deposit(90);
+      await mineBlocks(1);
+      let rewards = await blocksStakingContract.rewardsPerBlockPerToken();
+      expect(rewards.toNumber(), "There needs to be rewards returned per block token").to.be.greaterThan(0);
+    });
 
   });
 });
