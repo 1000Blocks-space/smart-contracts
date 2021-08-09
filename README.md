@@ -18,7 +18,6 @@ Contracts (hardhat/contracts):
 - `BlocksSpace.sol` is main contract which handles buying of blocksareas and attaching pictures (main part of dApp)
 - `BlocksRewardsManager.sol` is receiving payments for blocksareas and manages where goes what. It is also handling initial distribution of BLS tokens as rewards
 - `BlocksStaking.sol` is contract where users can stake BLS tokens and in return they get BNBs that were used to purchase blocksareas on dApp
-- `BlocksSpacePresale.sol` was contract used for private limited community presale
 
 For better representation, you should check our concept:
 ![1000Blocks space concept](/Concept.svg)

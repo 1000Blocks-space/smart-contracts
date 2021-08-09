@@ -4,191 +4,218 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./BlocksRewardsManager.sol";
 
-
 contract BlocksSpace is Ownable {
-
-  struct Block {
-    uint price;
-    address owner;
-  }
-
-  struct BlockView {
-    uint price;
-    address owner;
-    uint16 blockNumber;
-  }
-
-  struct BlocksArea {
-    address owner;
-    uint blockstart;
-    uint blockend;
-    string imghash;
-    string text;
-    uint zindex;
-  }
-
-  struct UserState{
-    BlocksArea lastBlocksAreaBought;
-    uint lastPurchase;
-  }
-
-  uint constant PRICE_OF_LOGO_BLOCKS = 42 ether;
-
-  BlocksRewardsManager public rewardsPool;
-  uint public minTimeBetweenPurchases = 42 hours;
-  mapping(uint => Block) public blocks;
-  mapping(address => UserState) public users;
-
-  event BlocksAreaPurchased(address indexed blocksAreaOwner, uint startBlock, uint endBlock);
-
-  function updateRewardsPoolContract(address add_) public onlyOwner {
-    rewardsPool = BlocksRewardsManager(add_);
-  }
-
-  function updateMinTimeBetweenPurchases(uint256 inSeconds_) public onlyOwner {
-    minTimeBetweenPurchases = inSeconds_;
-  }
-
-  constructor(address rewardsPoolContract_) {
-    rewardsPool = BlocksRewardsManager(rewardsPoolContract_);
-    setPriceOfLogoBlocks(303, 604);
-  }
-
-  function setPriceOfLogoBlocks(uint256 startBlockId, uint256 endBlockId) internal {
-    // 303 - 604
-    (uint startBlockX, uint startBlockY) = getBlockLocation(startBlockId);
-    (uint endBlockX, uint endBlockY) = getBlockLocation(endBlockId);
-
-    for(uint i = startBlockX; i <= endBlockX; i++){
-      for(uint j = startBlockY; j <= endBlockY; j++){
-        blocks[i * 100 + j].price = PRICE_OF_LOGO_BLOCKS;
-        blocks[i * 100 + j].owner = msg.sender;
-      }
+    struct Block {
+        uint256 price;
+        address owner;
     }
-  }
 
-  function purchaseBlocksArea(uint startBlockId, uint endBlockId, string calldata imghash, string calldata text) external payable {
-
-    // 1. Checks
-    uint paymentReceived = msg.value;
-    require(paymentReceived > 0, "Money expected...");
-    require(block.timestamp >= users[msg.sender].lastPurchase + minTimeBetweenPurchases, "You must wait 42h between buys");
-    require(isBlocksAreaValid(startBlockId, endBlockId), "BlocksArea invalid");
-    require(bytes(imghash).length != 0, "Image hash cannot be empty");
-
-    (uint currentPriceOfBlocksArea, uint numberOfBlocks) = calculatePriceAndSize(startBlockId, endBlockId);   
-
-    // Price increase per block needs to be at least minimal
-    uint priceIncreasePerBlock = (paymentReceived - currentPriceOfBlocksArea) / numberOfBlocks;
-    require(priceIncreasePerBlock > 0, "Price increase too small");
-
-    // 2. Storage operations
-    address[] memory previousBlockOwners = calculateBlocksOwnershipChanges(startBlockId, endBlockId, priceIncreasePerBlock); 
-    updateUserState(msg.sender, startBlockId, endBlockId, imghash, text);
-
-    // 3. Transactions   
-    // Send fresh info to RewardsPool contract, so buyer gets some sweet rewards
-    rewardsPool.blocksAreaBoughtOnSpace{value: paymentReceived}(0, msg.sender, numberOfBlocks, previousBlockOwners);
-
-    // 4. Emit purchase event
-    emit BlocksAreaPurchased(msg.sender, startBlockId * 10000000 + endBlockId, paymentReceived);
-  }
-
-  function calculateBlocksOwnershipChanges(uint startBlockId, uint endBlockId, uint priceIncreasePerBlock) internal returns (address[] memory) {
-    
-    (uint startBlockX, uint startBlockY) = getBlockLocation(startBlockId);
-    (uint endBlockX, uint endBlockY) = getBlockLocation(endBlockId);
-
-    // Go through all blocks that were paid for
-    address[] memory previousBlockOwners = new address[](42);
-    uint256 arrayIndex = 0;
-    for(uint i = startBlockX; i <= endBlockX; i++){
-      for(uint j = startBlockY; j <= endBlockY; j++){
-        //Set new state of the Block
-        Block storage currentBlock = blocks[i * 100 + j];      
-        currentBlock.price += priceIncreasePerBlock; // Set new price that was paid for this block
-        previousBlockOwners[arrayIndex] = currentBlock.owner;
-        currentBlock.owner = msg.sender; // Set new owner of block
-        arrayIndex++;
-      }
+    struct BlockView {
+        uint256 price;
+        address owner;
+        uint16 blockNumber;
     }
-    return previousBlockOwners;
-  }
 
-  function updateUserState(address user, uint startBlockId, uint endBlockId, string calldata imghash, string calldata text) internal {
-    UserState storage userState = users[user];   
-    userState.lastBlocksAreaBought.owner = user;
-    userState.lastBlocksAreaBought.blockstart = startBlockId;
-    userState.lastBlocksAreaBought.blockend = endBlockId;
-    userState.lastBlocksAreaBought.imghash = imghash;
-    userState.lastBlocksAreaBought.text = text;
-    userState.lastBlocksAreaBought.zindex = block.number;
-    userState.lastPurchase = block.timestamp;
-  }
+    struct BlocksArea {
+        address owner;
+        uint256 blockstart;
+        uint256 blockend;
+        string imghash;
+        string text;
+        uint256 zindex;
+    }
 
-  function getPricesOfBlocks(uint startBlockId, uint endBlockId) external view returns(BlockView[] memory){
+    struct BlockAreaLocation {
+        uint256 startBlockX;
+        uint256 startBlockY;
+        uint256 endBlockX;
+        uint256 endBlockY;
+    }
 
-    require(isBlocksAreaValid(startBlockId, endBlockId), "BlocksArea invalid");
+    struct UserState {
+        BlocksArea lastBlocksAreaBought;
+        uint256 lastPurchase;
+    }
 
-    (uint startBlockX, uint startBlockY) = getBlockLocation(startBlockId);
-    (uint endBlockX, uint endBlockY) = getBlockLocation(endBlockId);
+    uint256 constant PRICE_OF_LOGO_BLOCKS = 42 ether;
 
-    BlockView[42] memory blockAreaTemp;
-    uint256 arrayCounter;
-    for(uint16 i = uint16(startBlockX); i <= endBlockX; i++){
-      for(uint16 j = uint16(startBlockY); j <= endBlockY; j++){
-        blockAreaTemp[arrayCounter] = BlockView(
-          blocks[i * 100 + j].price, 
-          blocks[i * 100 + j].owner, 
-          (i * 100 + j) // block number
+    BlocksRewardsManager public rewardsPool;
+    uint256 public minTimeBetweenPurchases = 42 hours;
+    mapping(uint256 => Block) public blocks;
+    mapping(address => UserState) public users;
+
+    event BlocksAreaPurchased(address indexed blocksAreaOwner, uint256 startBlock, uint256 endBlock);
+
+    function updateRewardsPoolContract(address add_) external onlyOwner {
+        rewardsPool = BlocksRewardsManager(add_);
+    }
+
+    function updateMinTimeBetweenPurchases(uint256 inSeconds_) external onlyOwner {
+        minTimeBetweenPurchases = inSeconds_;
+    }
+
+    constructor(address rewardsPoolContract_) {
+        rewardsPool = BlocksRewardsManager(rewardsPoolContract_);
+        setPriceOfLogoBlocks(0, 301);
+    }
+
+    function setPriceOfLogoBlocks(uint256 startBlockId_, uint256 endBlockId_) internal {
+        // 0 - 301
+        (uint256 startBlockX, uint256 startBlockY) = (startBlockId_ / 100, startBlockId_ % 100);
+        (uint256 endBlockX, uint256 endBlockY) = (endBlockId_ / 100, endBlockId_ % 100);
+
+        for (uint256 i = startBlockX; i <= endBlockX; ++i) {
+            for (uint256 j = startBlockY; j <= endBlockY; ++j) {
+                Block storage currentBlock = blocks[i * 100 + j];
+                currentBlock.price = PRICE_OF_LOGO_BLOCKS;
+                currentBlock.owner = msg.sender;
+            }
+        }
+    }
+
+    function purchaseBlocksArea(
+        uint256 startBlockId_,
+        uint256 endBlockId_,
+        string calldata imghash_,
+        string calldata text_
+    ) external payable {
+        BlockAreaLocation memory areaLoc = BlockAreaLocation(
+            startBlockId_ / 100,
+            startBlockId_ % 100,
+            endBlockId_ / 100,
+            endBlockId_ % 100
         );
-        arrayCounter++;
-      }
+
+        // 1. Checks
+        uint256 paymentReceived = msg.value;
+        require(paymentReceived > 0, "Money expected...");
+        require(
+            block.timestamp >= users[msg.sender].lastPurchase + minTimeBetweenPurchases,
+            "You must wait 42h between buys"
+        );
+        require(isBlocksAreaValid(areaLoc), "BlocksArea invalid");
+        require(bytes(imghash_).length != 0, "Image hash cannot be empty");
+
+        (uint256 currentPriceOfBlocksArea, uint256 numberOfBlocks) = calculatePriceAndSize(areaLoc);
+
+        // Price increase per block needs to be at least minimal
+        uint256 priceIncreasePerBlock_ = (paymentReceived - currentPriceOfBlocksArea) / numberOfBlocks;
+        require(priceIncreasePerBlock_ > 0, "Price increase too small");
+
+        // 2. Storage operations
+        (address[] memory previousBlockOwners, uint256[] memory previousOwnersPrices) = calculateBlocksOwnershipChanges(
+            areaLoc,
+            priceIncreasePerBlock_,
+            numberOfBlocks
+        );
+        updateUserState(msg.sender, startBlockId_, endBlockId_, imghash_, text_);
+
+        // 3. Transactions
+        // Send fresh info to RewardsPool contract, so buyer gets some sweet rewards
+        rewardsPool.blocksAreaBoughtOnSpace{value: paymentReceived}(
+            0,
+            msg.sender,
+            previousBlockOwners,
+            previousOwnersPrices
+        );
+
+        // 4. Emit purchase event
+        emit BlocksAreaPurchased(msg.sender, startBlockId_ * 10000000 + endBlockId_, paymentReceived);
     }
 
-    // Shrink array and return only whats filled
-    BlockView[] memory blockArea = new BlockView[](arrayCounter);
-    for(uint i; i < arrayCounter; i++){
-      blockArea[i] = blockAreaTemp[i];
+    function calculateBlocksOwnershipChanges(
+        BlockAreaLocation memory areaLoc,
+        uint256 priceIncreasePerBlock_,
+        uint256 numberOfBlocks_
+    ) internal returns (address[] memory, uint256[] memory) {
+        // Go through all blocks that were paid for
+        address[] memory previousBlockOwners = new address[](numberOfBlocks_);
+        uint256[] memory previousOwnersPrices = new uint256[](numberOfBlocks_);
+        uint256 arrayIndex = 0;
+        for (uint256 i = areaLoc.startBlockX; i <= areaLoc.endBlockX; ++i) {
+            for (uint256 j = areaLoc.startBlockY; j <= areaLoc.endBlockY; ++j) {
+                //Set new state of the Block
+                Block storage currentBlock = blocks[i * 100 + j];
+                previousBlockOwners[arrayIndex] = currentBlock.owner;
+                previousOwnersPrices[arrayIndex] = currentBlock.price;
+                currentBlock.price = currentBlock.price + priceIncreasePerBlock_; // Set new price that was paid for this block
+                currentBlock.owner = msg.sender; // Set new owner of block
+                ++arrayIndex;
+            }
+        }
+        return (previousBlockOwners, previousOwnersPrices);
     }
-    return blockArea;
-  }
 
-  function calculatePriceAndSize(uint startBlockId, uint endBlockId) internal view returns(uint, uint){
-
-    (uint startBlockX, uint startBlockY) = getBlockLocation(startBlockId);
-    (uint endBlockX, uint endBlockY) = getBlockLocation(endBlockId);
-
-    uint currentPrice;
-    uint numberOfBlocks;
-    for(uint i = startBlockX; i <= endBlockX; i++){
-      for(uint j = startBlockY; j <= endBlockY; j++){
-        currentPrice += blocks[i * 100 + j].price;
-        numberOfBlocks++;
-      }
+    function updateUserState(
+        address user_,
+        uint256 startBlockId_,
+        uint256 endBlockId_,
+        string calldata imghash_,
+        string calldata text_
+    ) internal {
+        UserState storage userState = users[user_];
+        userState.lastBlocksAreaBought.owner = user_;
+        userState.lastBlocksAreaBought.blockstart = startBlockId_;
+        userState.lastBlocksAreaBought.blockend = endBlockId_;
+        userState.lastBlocksAreaBought.imghash = imghash_;
+        userState.lastBlocksAreaBought.text = text_;
+        userState.lastBlocksAreaBought.zindex = block.number;
+        userState.lastPurchase = block.timestamp;
     }
-    return (currentPrice, numberOfBlocks);
-  }
 
-  function isBlocksAreaValid(uint startBlockId, uint endBlockId) internal pure returns(bool){
-    (uint startBlockX, uint startBlockY) = getBlockLocation(startBlockId);
-    (uint endBlockX, uint endBlockY) = getBlockLocation(endBlockId);
-        
-    require(startBlockX < 42 && endBlockX < 42, "X blocks out of range. Oh Why?");
-    require(startBlockY < 24 && endBlockY < 24, "Y blocks out of range. Oh Why?");
-    
-    uint blockWidth = endBlockX - startBlockX + 1; // +1 because its including
-    uint blockHeight = endBlockY - startBlockY + 1; // +1 because its including
-    uint blockArea = blockWidth * blockHeight;
+    function getPricesOfBlocks(uint256 startBlockId_, uint256 endBlockId_) external view returns (BlockView[] memory) {
+        BlockAreaLocation memory areaLoc = BlockAreaLocation(
+            startBlockId_ / 100,
+            startBlockId_ % 100,
+            endBlockId_ / 100,
+            endBlockId_ % 100
+        );
 
-    return blockWidth <= 7 && blockHeight <= 7 && blockArea <= 42;
-  }
+        require(isBlocksAreaValid(areaLoc), "BlocksArea invalid");
 
-  function getBlockLocation(uint blockId) internal pure returns(uint, uint){
-    return (blockId / 100, blockId % 100);
-  }
+        BlockView[42] memory blockAreaTemp;
+        uint256 arrayCounter;
+        for (uint256 i = areaLoc.startBlockX; i <= areaLoc.endBlockX; ++i) {
+            for (uint256 j = areaLoc.startBlockY; j <= areaLoc.endBlockY; ++j) {
+                uint16 index = uint16(i * 100 + j);
+                Block storage currentBlock = blocks[index];
+                blockAreaTemp[arrayCounter] = BlockView(
+                    currentBlock.price,
+                    currentBlock.owner,
+                    index // block number
+                );
+                ++arrayCounter;
+            }
+        }
 
+        // Shrink array and return only whats filled
+        BlockView[] memory blockArea = new BlockView[](arrayCounter);
+        for (uint256 i; i < arrayCounter; ++i) {
+            blockArea[i] = blockAreaTemp[i];
+        }
+        return blockArea;
+    }
+
+    function calculatePriceAndSize(BlockAreaLocation memory areaLoc) internal view returns (uint256, uint256) {
+        uint256 currentPrice;
+        uint256 numberOfBlocks;
+        for (uint256 i = areaLoc.startBlockX; i <= areaLoc.endBlockX; ++i) {
+            for (uint256 j = areaLoc.startBlockY; j <= areaLoc.endBlockY; ++j) {
+                currentPrice = currentPrice + blocks[i * 100 + j].price;
+                ++numberOfBlocks;
+            }
+        }
+        return (currentPrice, numberOfBlocks);
+    }
+
+    function isBlocksAreaValid(BlockAreaLocation memory areaLoc) internal pure returns (bool) {
+        require(areaLoc.startBlockX < 42 && areaLoc.endBlockX < 42, "X blocks out of range. Oh Why?");
+        require(areaLoc.startBlockY < 24 && areaLoc.endBlockY < 24, "Y blocks out of range. Oh Why?");
+
+        uint256 blockWidth = areaLoc.endBlockX - areaLoc.startBlockX + 1; // +1 because its including
+        uint256 blockHeight = areaLoc.endBlockY - areaLoc.startBlockY + 1; // +1 because its including
+        uint256 blockArea = blockWidth * blockHeight;
+
+        return blockWidth <= 7 && blockHeight <= 7 && blockArea <= 42;
+    }
 }
-
-
-

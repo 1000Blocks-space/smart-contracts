@@ -11,15 +11,17 @@ describe("Testing BlocksSpace", function() {
   let blocksStaking;
   let blocksSpaceContract;
   async function setup() {
+    [owner] = await ethers.getSigners(); // simulate different wallets
     const contractObject = await ethers.getContractFactory("BLSToken");
     blsContract = await contractObject.deploy();
     const blocksStakingObject = await ethers.getContractFactory("BlocksStaking");
     blocksStaking = await blocksStakingObject.deploy(blsContract.address);
     const contractObject2 = await ethers.getContractFactory("BlocksRewardsManager");
-    rewardsManagerContract = await contractObject2.deploy(blsContract.address, blocksStaking.address);
+    rewardsManagerContract = await contractObject2.deploy(blsContract.address, blocksStaking.address, owner.address);
     const contractObject3 = await ethers.getContractFactory("BlocksSpace");
     blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address);
     await rewardsManagerContract.addSpace(blocksSpaceContract.address, 5);
+    await blsContract.transfer(rewardsManagerContract.address, 1000);
   }
 
   async function mineBlocks(numberOfBlocks){
@@ -34,6 +36,15 @@ describe("Testing BlocksSpace", function() {
     await ethers.provider.send('evm_mine');
   }
 
+  // describe.only("Scenario: Purchasing posters", function() {
+
+  //   it("Setup and check ERC20 compatibility", async function() {
+  //     [owner, walletA] = await ethers.getSigners(); // simulate different wallets
+  //     await setup();
+  //     let transfer = await blsContract.connect(walletA).transfer(owner.address, 1);
+  //     console.log(transfer);
+  //   });
+  // });
   describe("Scenario: Purchasing posters", function() {
 
     it("Setup", async function() {
@@ -42,19 +53,19 @@ describe("Testing BlocksSpace", function() {
     });
     
     it("Simple purchase of poster", async function() {
-      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0000", "0000", "imagehash1", "https://1000block.space", {value: 1});
+      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0502", "0502", "imagehash1", "https://1000block.space", {value: 1});
     });
 
     it("Simple purchase without money", async function() {
-      await expect(blocksSpaceContract.connect(walletB).purchaseBlocksArea("0000", "0000", "imagehash1", "https://1000block.space", {value: 0})).to.be.reverted;
+      await expect(blocksSpaceContract.connect(walletB).purchaseBlocksArea("0502", "0502", "imagehash1", "https://1000block.space", {value: 0})).to.be.reverted;
     });
     
     it("Want to overtake block, but with same amount of money as previous", async function() {
-      await expect(blocksSpaceContract.connect(walletB).purchaseBlocksArea("0000", "0000", "imagehash1", "https://1000block.space", {value: 1})).to.be.reverted;
+      await expect(blocksSpaceContract.connect(walletB).purchaseBlocksArea("0502", "0502", "imagehash1", "https://1000block.space", {value: 1})).to.be.reverted;
     });
 
     it("Overtaking single block, now paying more money", async function() {
-      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0000", "0000", "imagehash2", "https://1000block.space", {value: 2});
+      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0502", "0502", "imagehash2", "https://1000block.space", {value: 2});
     });
 
     it("Purchasing 3 x 3 blocks, but price increase per block too small", async function() {
@@ -87,15 +98,15 @@ describe("Testing BlocksSpace", function() {
 
     it("Same wallet cannot purchase 2 blockareas immediately", async function() {
       await setup();
-      await blocksSpaceContract.purchaseBlocksArea("0000", "0000", "imagehash1", "https://1000block.space", {value: 1});
-      await expect(blocksSpaceContract.purchaseBlocksArea("0000", "0000", "imagehash1", "https://1000block.space", {value: 10})).to.be.reverted;
+      await blocksSpaceContract.purchaseBlocksArea("0502", "0502", "imagehash1", "https://1000block.space", {value: 1});
+      await expect(blocksSpaceContract.purchaseBlocksArea("0502", "0502", "imagehash1", "https://1000block.space", {value: 10})).to.be.reverted;
     });
 
     it("Same wallet purchase 2 blockareas with span inbetween 42h", async function() {
       await setup();
-      await blocksSpaceContract.purchaseBlocksArea("0100", "0100", "imagehash1", "https://1000block.space", {value: 1});
+      await blocksSpaceContract.purchaseBlocksArea("0502", "0502", "imagehash1", "https://1000block.space", {value: 1});
       await mineBlockAndMoveTimestamp(42 * 60 * 60 + 60); //+60s for error
-      await blocksSpaceContract.purchaseBlocksArea("0100", "0100", "imagehash1", "https://1000block.space", {value: 10});
+      await blocksSpaceContract.purchaseBlocksArea("0502", "0502", "imagehash1", "https://1000block.space", {value: 10});
     });   
   });
 
@@ -129,14 +140,14 @@ describe("Testing BlocksSpace", function() {
       
     it("Initial price of blocks", async function () {
       await setup();
-      const block = await blocksSpaceContract.blocks("0000");
+      const block = await blocksSpaceContract.blocks("0002");
       expect(block.price, "Top edge block needs to be 0").to.equal(0);
 
-      // Blocks 303 - 604 currnetly reserved for poster
-      const blockPoster0 = await blocksSpaceContract.blocks("0303");
+      // Blocks 0 - 301 currnetly reserved for poster
+      const blockPoster0 = await blocksSpaceContract.blocks("0000");
       expect(blockPoster0.price, "Top left block of LOGO should be 42").to.equal(ethers.utils.parseEther("42"));
 
-      const blockPoster1 = await blocksSpaceContract.blocks("0604");
+      const blockPoster1 = await blocksSpaceContract.blocks("0301");
       expect(blockPoster1.price, "Right bot block of LOGO should be 42").to.equal(ethers.utils.parseEther("42"));
 
       const edgeBlock = await blocksSpaceContract.blocks("4123");
