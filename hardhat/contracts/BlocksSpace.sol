@@ -42,7 +42,9 @@ contract BlocksSpace is Ownable {
     uint256 public minTimeBetweenPurchases = 42 hours;
     mapping(uint256 => Block) public blocks;
     mapping(address => UserState) public users;
-
+    
+    event RewardsPoolContractUpdated(address add);
+    event MinTimeBetweenPurchasesUpdated(uint256 inSeconds);
     event BlocksAreaPurchased(address indexed blocksAreaOwner, uint256 blocksBought, uint256 paid);
 
     constructor(address rewardsPoolContract_, uint256 spaceId_) {
@@ -209,11 +211,8 @@ contract BlocksSpace is Ownable {
         return blockWidth <= 7 && blockHeight <= 7 && blockArea <= 42;
     }
 
-    function updateRewardsPoolContract(address add_) external onlyOwner {
-        rewardsPool = BlocksRewardsManager(add_);
-    }
-
     function updateMinTimeBetweenPurchases(uint256 inSeconds_) external onlyOwner {
         minTimeBetweenPurchases = inSeconds_;
+        emit MinTimeBetweenPurchasesUpdated(inSeconds_);
     }
 }

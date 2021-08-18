@@ -49,6 +49,23 @@ describe("Testing BlocksStaking", function() {
 
     it("Deposit BNB when noone is staking", deposit1000Wei);
 
+    it("should claim 0 rewards if nothing was ever deposited", async function() {
+      await setup();
+      await blsContract.transfer(walletA.address, 1);
+      await blsContract.connect(walletA).approve(blocksStakingContract.address, 1);
+      await blocksStakingContract.setRewardDistributionPeriod(20);
+      await blocksStakingContract.connect(walletA).deposit(1);
+
+      await mineBlocks(1);     
+      let pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 0 pending rewards").to.equal(0);
+      // Trying to claim 0
+      let balanceWalletABefore = await ethers.provider.getBalance(walletA.address);
+      await blocksStakingContract.connect(walletA).claim({gasPrice:0}); 
+      let balanceWalletAAfter = await ethers.provider.getBalance(walletA.address);
+      expect((balanceWalletAAfter.sub(balanceWalletABefore)).toNumber(), "Balance should be 0").to.equal(0);
+    });
+
   });
   
   describe("Scenario: Stake BLS  with rewards already waiting", function() {
@@ -650,7 +667,7 @@ describe("Testing BlocksStaking", function() {
       let rewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
       expect(rewardsA.toNumber(), "A should have 50 rewards (25%) from takeover...").to.equal(50);
       await mineBlocks(1);
-      console.log("WalletB: ", walletB.address);
+
       // C takes over half of block from B. B should get 25% of 400
       await blocksSpaceContract.connect(walletC).purchaseBlocksArea("0502", "0503", "imagehash1", {value: 400}); // 240 pool, 100 takeover
       let rewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
@@ -682,7 +699,6 @@ describe("Testing BlocksStaking", function() {
       expect(rewardsA.toNumber(), "A should have 50 rewards (25%) from takeover...").to.equal(50);
       await blocksStakingContract.connect(walletA).claim(); // Claims 50 of takeover rewards
 
-      console.log("WalletB: ", walletB.address);
       // C takes over half of block from B. B should get 25% of 400
       await blocksSpaceContract.connect(walletC).purchaseBlocksArea("0502", "0503", "imagehash1", {value: 400}); // 240 pool, 100 takeover
       let rewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
@@ -698,6 +714,352 @@ describe("Testing BlocksStaking", function() {
       await mineBlocks(11); // Run all rewards out
       rewardsC = await blocksStakingContract.connect(walletC).pendingRewards(walletC.address);
       expect(rewardsC.toNumber(), "C should have 445 rewards at this point").to.equal(445);
+    });
+  });
+
+  // Finding BUG: IDX-003 Incorrect Reward Calculation from allUsersRewardDebt
+  describe("Scenario: Proper rewards distribution till the end", function() {
+    
+    it("should properly distribute rewards when single user has deposited BLS into staking and multiple distributeRewards happen", async function() {
+      await setup();
+      await blsContract.transfer(walletA.address, 10);
+      await blsContract.connect(walletA).approve(blocksStakingContract.address, 10);
+      await blocksStakingContract.setRewardDistributionPeriod(20);
+      await blocksStakingContract.connect(walletA).deposit(1);
+
+      await mineBlocks(1);     
+      let pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 0 pending rewards").to.equal(0);
+
+      // Trying to claim 0
+      let balanceWalletABefore = await ethers.provider.getBalance(walletA.address);
+      await blocksStakingContract.connect(walletA).claim({gasPrice:0}); 
+      let balanceWalletAAfter = await ethers.provider.getBalance(walletA.address);
+      expect((balanceWalletAAfter.sub(balanceWalletABefore)).toNumber(), "Balance should be 0").to.equal(0);
+
+      // Incoming first rewards. This should give our user 50 rewards per block
+      await blocksStakingContract.distributeRewards([],[], {value: 1000});
+      await mineBlocks(2);
+
+      // User now deposits additional token, but since he is still alone, he should get all rewards
+      await blocksStakingContract.connect(walletA).deposit(1); // Transaction
+
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "With deposit rewards are autoclaimed, so pending should be 0").to.equal(0);
+
+      // Incoming second rewards. 
+      await blocksStakingContract.distributeRewards([],[], {value: 1000});
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "Here pending should be 50 (still old ones)").to.equal(50);
+      // This should give our user 90(1800/20) rewards per block from now on
+
+      await mineBlocks(4);
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 50 (from before) + 360 (90*4) => 410 pending rewards").to.equal(410);
+
+      // Finish rewards
+      await mineBlocks(22); 
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have (2000 - 150 already claimed) => 1850 pending rewards").to.equal(1850);      
+    });
+
+    it("should properly distribute rewards when multiple users deposited same amount BLS into staking and multiple distributeRewards happen", async function() {
+      await setup();
+      await blsContract.transfer(walletA.address, 10);
+      await blsContract.transfer(walletB.address, 10);
+      await blsContract.connect(walletA).approve(blocksStakingContract.address, 10);
+      await blsContract.connect(walletB).approve(blocksStakingContract.address, 10);
+      await blocksStakingContract.setRewardDistributionPeriod(20);
+      await blocksStakingContract.connect(walletA).deposit(1);
+
+      // Incoming first rewards. This should give our user 50 rewards per block
+      await blocksStakingContract.distributeRewards([],[], {value: 1000});
+
+      await mineBlocks(5);     
+      let pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 250 (5*50) pending rewards").to.equal(250);
+
+      // Now user 2 deposits
+      await blocksStakingContract.connect(walletB).deposit(1); // At this point user A has 300 rewards
+      // Rewards still 50, user A gets 25 and user B gets 25
+      await mineBlocks(10);
+
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 550 (300 from before + 10*25) pending rewards").to.equal(550);
+      let pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 250 (10*25) pending rewards").to.equal(250);
+
+      // Incoming second rewards. This should give 150 (remaining from before) + 850 => 1000 / 20 = 50 per block
+      await blocksStakingContract.distributeRewards([],[], {value: 850}); // A = 575 B = 275
+
+      await mineBlocks(10);
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 825 (575 from before + 10*25) pending rewards").to.equal(825);
+      pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 525 (275 from before + 10*25) pending rewards").to.equal(525);
+
+      // Rewards now run out
+      await mineBlocks(12);
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 1075 (825 from before + 10*25) pending rewards").to.equal(1075);
+      pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 775 (525 from before + 10*25) pending rewards").to.equal(775);
+
+      expect(1075 + 775, "Sum of pending rewards after they run out should be equal to amount of input").to.equal(1000+850);
+    });
+
+    it("should properly distribute rewards when multiple users deposited different BLS into staking and multiple distributeRewards happen", async function() {
+      await setup();
+      await blsContract.transfer(walletA.address, 10);
+      await blsContract.transfer(walletB.address, 10);
+      await blsContract.connect(walletA).approve(blocksStakingContract.address, 10);
+      await blsContract.connect(walletB).approve(blocksStakingContract.address, 10);
+      await blocksStakingContract.setRewardDistributionPeriod(20);
+      await blocksStakingContract.connect(walletA).deposit(1);
+
+      // Incoming first rewards. This should give our user 50 rewards per block
+      await blocksStakingContract.distributeRewards([],[], {value: 1000});
+
+      await mineBlocks(5);     
+      let pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 250 (5*50) pending rewards").to.equal(250);
+
+      // Now user 2 deposits
+      await blocksStakingContract.connect(walletB).deposit(3); // At this point user A has 300 rewards
+      // Rewards still 50, user A gets 12.5 and user B gets 37.5
+      await mineBlocks(9);
+
+      // Incoming second rewards. This should give 200 (remaining from before) + 1800 => 2000 / 20 = 100 per block
+      await blocksStakingContract.distributeRewards([],[], {value: 1800});
+
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 425 (300 from before + 10*12.5) pending rewards").to.equal(425);
+      let pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 375 (10*37.5) pending rewards").to.equal(375);
+
+      // From here on A gets 25 per block and B gets 75 per block
+      await mineBlocks(10);
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 675 (425 from before + 10*25) pending rewards").to.equal(675);
+      pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 1125 (375 from before + 10*75) pending rewards").to.equal(1125);
+
+      // // Rewards now run out
+      await mineBlocks(12);
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 925 (675 from before + 10*25) pending rewards").to.equal(925);
+      pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 1875 (1125 from before + 10*75) pending rewards").to.equal(1875);
+
+      expect(925 + 1875, "Sum of pending rewards after they run out should be equal to amount of input").to.equal(1000+1800);
+    });
+
+    it("should properly distribute rewards when multiple users deposited different BLS into staking and multiple distributeRewards happen case 2", async function() {
+      await setup();
+      await blsContract.transfer(walletA.address, 10);
+      await blsContract.transfer(walletB.address, 10);
+      await blsContract.transfer(walletC.address, 20);
+      await blsContract.connect(walletA).approve(blocksStakingContract.address, 10);
+      await blsContract.connect(walletB).approve(blocksStakingContract.address, 10);
+      await blsContract.connect(walletC).approve(blocksStakingContract.address, 20);
+      await blocksStakingContract.setRewardDistributionPeriod(20);
+      await blocksStakingContract.connect(walletA).deposit(1);
+
+      // Incoming first rewards. This should give our user 50 rewards per block
+      await blocksStakingContract.distributeRewards([],[], {value: 1000});
+
+      await mineBlocks(5);     
+      let pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 250 (5*50) pending rewards").to.equal(250);
+
+      // Now user 2 deposits
+      await blocksStakingContract.connect(walletB).deposit(3); // At this point user A has 300 rewards
+      // Rewards still 50, user A gets 12.5 and user B gets 37.5
+      await mineBlocks(9);
+
+      // Incoming second rewards. This should give 200 (remaining from before) + 1800 => 2000 / 20 = 100 per block
+      await blocksStakingContract.distributeRewards([],[], {value: 1800});
+
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 425 (300 from before + 10*12.5) pending rewards").to.equal(425);
+      let pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 375 (10*37.5) pending rewards").to.equal(375);
+
+      // From here on A gets 25 per block and B gets 75 per block
+      await mineBlocks(9);
+      // Here C comes into play with deposit of 
+      await blocksStakingContract.connect(walletC).deposit(16);
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 675 (425 from before + 10*25) pending rewards").to.equal(675);
+      pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 1125 (375 from before + 10*75) pending rewards").to.equal(1125);
+
+      // A getting 5, B getting 15 and C getting 80
+      await mineBlocks(1);
+      // Incoming third rewards. This should give 800 (remaining from before) + 3200 => 4000 / 20 = 200 per block
+      await blocksStakingContract.distributeRewards([],[], {value: 3200});
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 685 (675 from before + 2*5) pending rewards").to.equal(685);
+      pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 1155 (1125 from before + 2*15) pending rewards").to.equal(1155);
+      let pendRewardsC = await blocksStakingContract.connect(walletC).pendingRewards(walletC.address);
+      expect(pendRewardsC.toNumber(), "C should have 160 (2*80) pending rewards").to.equal(160);
+
+      // Now new era comes, rewards per block are 200. A = 10, B = 30, C = 160
+      await mineBlocks(21); // We run out of rewards here
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 885 (685 from before + 20*10) pending rewards").to.equal(885);
+      pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 1755 (1155 from before + 20*30) pending rewards").to.equal(1755);
+      pendRewardsC = await blocksStakingContract.connect(walletC).pendingRewards(walletC.address);
+      expect(pendRewardsC.toNumber(), "C should have 3360 (160 from before + 20*160) pending rewards").to.equal(3360);
+    });
+
+    it("should properly distribute rewards when multiple users deposited different BLS into staking and multiple distributeRewards happen case 2", async function() {
+      await setup();
+      await blsContract.transfer(walletA.address, 10);
+      await blsContract.transfer(walletB.address, 10);
+      await blsContract.transfer(walletC.address, 20);
+      await blsContract.connect(walletA).approve(blocksStakingContract.address, 10);
+      await blsContract.connect(walletB).approve(blocksStakingContract.address, 10);
+      await blsContract.connect(walletC).approve(blocksStakingContract.address, 20);
+      await blocksStakingContract.setRewardDistributionPeriod(20);
+      await blocksStakingContract.connect(walletA).deposit(1);
+
+      // Incoming first rewards. This should give our user 50 rewards per block
+      await blocksStakingContract.distributeRewards([],[], {value: 1000});
+
+      await mineBlocks(5);     
+      let pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 250 (5*50) pending rewards").to.equal(250);
+
+      // Now user 2 deposits
+      await blocksStakingContract.connect(walletB).deposit(3); // At this point user A has 300 rewards
+      // Rewards still 50, user A gets 12.5 and user B gets 37.5
+      await mineBlocks(9);
+
+      // Incoming second rewards. This should give 200 (remaining from before) + 1800 => 2000 / 20 = 100 per block
+      await blocksStakingContract.distributeRewards([],[], {value: 1800});
+
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 425 (300 from before + 10*12.5) pending rewards").to.equal(425);
+      let pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 375 (10*37.5) pending rewards").to.equal(375);
+
+      // From here on A gets 25 per block and B gets 75 per block
+      await mineBlocks(9);
+      // Here C comes into play with deposit of 
+      await blocksStakingContract.connect(walletC).deposit(16);
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 675 (425 from before + 10*25) pending rewards").to.equal(675);
+      pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 1125 (375 from before + 10*75) pending rewards").to.equal(1125);
+
+      // A getting 5, B getting 15 and C getting 80
+      await mineBlocks(1);
+      // Incoming third rewards. This should give 800 (remaining from before) + 3200 => 4000 / 20 = 200 per block
+      await blocksStakingContract.distributeRewards([],[], {value: 3200});
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 685 (675 from before + 2*5) pending rewards").to.equal(685);
+      pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 1155 (1125 from before + 2*15) pending rewards").to.equal(1155);
+      let pendRewardsC = await blocksStakingContract.connect(walletC).pendingRewards(walletC.address);
+      expect(pendRewardsC.toNumber(), "C should have 160 (2*80) pending rewards").to.equal(160);
+
+      // Now new era comes, rewards per block are 200. A = 10, B = 30, C = 160
+      await mineBlocks(9); 
+      // Something unexpected happens and C withdraws all his guts
+      let balanceWalletCBefore = await ethers.provider.getBalance(walletC.address);
+      await blocksStakingContract.connect(walletC).withdraw({gasPrice:0});
+      let balanceWalletCAfter = await ethers.provider.getBalance(walletC.address);
+      expect((balanceWalletCAfter.sub(balanceWalletCBefore)).toNumber(), "Balance should be 1760 after withdrawal").to.equal(1760);
+
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 785 (685 from before + 10*10) pending rewards").to.equal(785);
+      pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 1455 (1155 from before + 10*30) pending rewards").to.equal(1455);
+      pendRewardsC = await blocksStakingContract.connect(walletC).pendingRewards(walletC.address);
+      expect(pendRewardsC.toNumber(), "C should have 0 pending rewards directly after he withdraw").to.equal(0);
+
+      // From now on, its still 200 per block, A = 50 and B = 150
+      await mineBlocks(11); // We run out of rewards here
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 1285 (785 from before + 10*50) pending rewards").to.equal(1285);
+      pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 2955 (1455 from before + 10*150) pending rewards").to.equal(2955);
+      pendRewardsC = await blocksStakingContract.connect(walletC).pendingRewards(walletC.address);
+      expect(pendRewardsC.toNumber(), "C should have 0 pending rewards").to.equal(0);
+    });
+  });
+
+  describe("Scenario: Bug fixes", function() {
+    
+    it("should properly calculate rewards after rewards run out and another user deposits.", async function() {
+      await setup();
+      await blsContract.transfer(walletA.address, 10);
+      await blsContract.transfer(walletB.address, 10);
+      await blsContract.transfer(walletC.address, 20);
+      await blsContract.connect(walletA).approve(blocksStakingContract.address, 10);
+      await blsContract.connect(walletB).approve(blocksStakingContract.address, 10);
+      await blsContract.connect(walletC).approve(blocksStakingContract.address, 20);
+      await blocksStakingContract.setRewardDistributionPeriod(10);
+      let balanceWalletABefore = await ethers.provider.getBalance(walletA.address);
+      let balanceWalletBBefore = await ethers.provider.getBalance(walletB.address);
+      await blocksStakingContract.connect(walletA).deposit(1, {gasPrice:0});
+
+      // Incoming first rewards. This should give our user 100 rewards per block
+      await blocksStakingContract.distributeRewards([],[], {value: 1000});
+
+      await mineBlocks(20);   // Run rewards out and mine 10 extra blocks  
+      let pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 1000 pending rewards").to.equal(1000);
+
+      // Now user B deposits
+      await blocksStakingContract.connect(walletB).deposit(1, {gasPrice:0});
+      await mineBlocks(3); 
+      // Both should have zero, because no more rewards
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 1000 pending rewards becuase no more").to.equal(1000);
+      let pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 0 pending rewards becuase no more").to.equal(0);
+      
+      // Incoming second rewards. This should give our user 100 rewards per block
+      await blocksStakingContract.distributeRewards([],[], {value: 1000});
+
+      await mineBlocks(2);
+
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 1000 + 100 pending rewards").to.equal(1100);
+      pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 100 pending rewards").to.equal(100);
+
+      await mineBlocks(10); // Lets end rewards
+
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 1500 pending rewards ").to.equal(1500);
+      pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 500 pending rewards").to.equal(500);
+
+
+      await blocksStakingContract.connect(walletA).deposit(3, {gasPrice:0});
+      await mineBlocks(2);
+      await blocksStakingContract.distributeRewards([],[], {value: 1000}); 
+      // Rewards again 100, A = 80 B = 20
+      await mineBlocks(15);
+
+      pendRewardsA = await blocksStakingContract.connect(walletA).pendingRewards(walletA.address);
+      expect(pendRewardsA.toNumber(), "A should have 800 pending rewards").to.equal(800);
+      pendRewardsB = await blocksStakingContract.connect(walletB).pendingRewards(walletB.address);
+      expect(pendRewardsB.toNumber(), "B should have 500 + 200 pending rewards").to.equal(700);
+
+      await blocksStakingContract.connect(walletA).claim({gasPrice:0});
+      await blocksStakingContract.connect(walletB).claim({gasPrice:0});
+
+      // Check end results
+      let balanceWalletAAfter = await ethers.provider.getBalance(walletA.address);
+      expect((balanceWalletAAfter.sub(balanceWalletABefore)).toNumber(), "Balance should be 2300").to.equal(2300);
+      let balanceWalletBAfter = await ethers.provider.getBalance(walletB.address);
+      expect((balanceWalletBAfter.sub(balanceWalletBBefore)).toNumber(), "Balance should be 700").to.equal(700);
     });
 
   });
