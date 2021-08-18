@@ -43,7 +43,7 @@ contract BlocksSpace is Ownable {
     mapping(uint256 => Block) public blocks;
     mapping(address => UserState) public users;
 
-    event BlocksAreaPurchased(address indexed blocksAreaOwner, uint256 startBlock, uint256 endBlock);
+    event BlocksAreaPurchased(address indexed blocksAreaOwner, uint256 blocksBought, uint256 paid);
 
     constructor(address rewardsPoolContract_, uint256 spaceId_) {
         rewardsPool = BlocksRewardsManager(rewardsPoolContract_);
@@ -90,8 +90,9 @@ contract BlocksSpace is Ownable {
         (uint256 currentPriceOfBlocksArea, uint256 numberOfBlocks) = calculatePriceAndSize(areaLoc);
 
         // Price increase per block needs to be at least minimal
+        require(paymentReceived > currentPriceOfBlocksArea, "Price increase too small");
         uint256 priceIncreasePerBlock_ = (paymentReceived - currentPriceOfBlocksArea) / numberOfBlocks;
-        require(priceIncreasePerBlock_ > 0, "Price increase too small");
+        require(priceIncreasePerBlock_ > 0, "Price incr per block too small");
 
         // 2. Storage operations
         (address[] memory previousBlockOwners, uint256[] memory previousOwnersPrices) = calculateBlocksOwnershipChanges(
@@ -111,7 +112,7 @@ contract BlocksSpace is Ownable {
         );
 
         // 4. Emit purchase event
-        emit BlocksAreaPurchased(msg.sender, startBlockId_ * 10000000 + endBlockId_, paymentReceived);
+        emit BlocksAreaPurchased(msg.sender, startBlockId_ * 10000 + endBlockId_, paymentReceived);
     }
 
     function calculateBlocksOwnershipChanges(

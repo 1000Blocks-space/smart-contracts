@@ -73,7 +73,7 @@ contract BlocksStaking is Ownable {
     }
 
     function getMultiplier() internal view returns (uint256) {
-        if (block.number > rewardsFinishedBlock) {
+        if (block.number > rewardsFinishedBlock && rewardsFinishedBlock >= lastRewardCalculatedBlock) {
             return rewardsFinishedBlock - lastRewardCalculatedBlock;
         } else {
             return block.number - lastRewardCalculatedBlock;
@@ -123,6 +123,7 @@ contract BlocksStaking is Ownable {
         uint256 amount = user.amount;
         totalTokens = totalTokens - amount;
         user.amount = 0;
+        user.rewardDebt = 0;
 
         // Transfer BLS amount from this contract to the user
         uint256 amountWithdrawn = safeBlsTransfer(address(msg.sender), amount);
@@ -138,7 +139,8 @@ contract BlocksStaking is Ownable {
         if (reward <= 0) return; // skip if no rewards
 
         UserInfo storage user = userInfo[msg.sender];
-        user.rewardDebt = user.rewardDebt + reward; // reset: cache current total reward per token
+        takeoverRewards = takeoverRewards - user.takeoverReward;
+        user.rewardDebt = 0; // reset: cache current total reward per token
         user.takeoverReward = 0; // reset takeover reward
 
         // transfer reward in BNBs to the user

@@ -69,7 +69,12 @@ describe("Testing BlocksSpace", function() {
     });
 
     it("Purchasing 3 x 3 blocks, but price increase per block too small", async function() {
-      await expect(blocksSpaceContract.connect(walletC).purchaseBlocksArea("0505", "0707", "imagehash2", {value: 2})).to.be.revertedWith("Price increase too small");
+      await expect(blocksSpaceContract.connect(walletC).purchaseBlocksArea("0505", "0707", "imagehash2", {value: 2})).to.be.revertedWith("Price incr per block too small");
+    });
+
+    // Fixing BUG
+    it("Purchasing initial logo blocks but price increase per block too small", async function() {
+      await expect(blocksSpaceContract.connect(walletC).purchaseBlocksArea("0000", "0000", "imagehash2", {value: 2})).to.be.revertedWith("Price increase too small");
     });
     
     it("Purchasing 3 x 3 blocks, paying at least 1 / block more.", async function() {
@@ -182,4 +187,3 @@ describe("Testing BlocksSpace", function() {
 
   });
 });
-
