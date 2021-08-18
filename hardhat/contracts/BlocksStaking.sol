@@ -101,7 +101,7 @@ contract BlocksStaking is Ownable {
         totalTokens = totalTokens + amount_; // sum of total staked amount
         user.amount = user.amount + amount_; // cache staked amount count for this wallet
         user.rewardDebt = (accRewardsPerShare * user.amount) / 1e12; // cache current total reward per token
-        allUsersRewardDebt = (accRewardsPerShare * user.amount) / 1e12;
+        allUsersRewardDebt = allUsersRewardDebt + (accRewardsPerShare * user.amount) / 1e12;
         emit Deposit(msg.sender, amount_);
         // Transfer BLS amount from the user to this contract
         blsToken.safeTransferFrom(address(msg.sender), address(this), amount_);
