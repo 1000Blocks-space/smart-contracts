@@ -11,7 +11,7 @@ contract BlocksRewardsManager is Ownable {
     struct UserInfo {
         uint256 amount; // How many blocks user owns currently.
         uint256 pendingRewards; // Rewards assigned, but not yet claimed
-        uint256 lastRewardCalculatedBlock; // When pending rewards were last calculated for user
+        uint256 rewardsDebt;
     }
 
     // Info of each blocks.space
@@ -20,6 +20,8 @@ contract BlocksRewardsManager is Ownable {
         uint256 amountOfBlocksBought; // Number of all blocks bought on this space
         address contractAddress; // Address of space contract.
         uint256 blsPerBlockAreaPerBlock; // Start with 830000000000000 wei (approx 24 BLS/block.area/day)
+        uint256 blsRewardsAcc;
+        uint256 blsRewardsAccLastUpdated;
     }
 
     // Management of splitting rewards
@@ -37,12 +39,11 @@ contract BlocksRewardsManager is Ownable {
     mapping(uint256 => mapping(address => UserInfo)) public userInfo;
     mapping(address => bool) public spacesByAddress;
     // Variables that support calculation of proper bls rewards distributions
-    uint256 public allAllocationBlocks; // Amount of all blocks from all spaces that are getting BLS rewards
-    uint256 public allBlsPerBlockAreaPerBlock;
-    uint256 public blsRewardsFinishedBlock;
-    uint256 public blsRewardsAcc; // bls rewards accumulated
-    uint256 public blsRewardsAccLastUpdatedBlock;
-    uint256 public blsRewardsClaimed;
+    uint256 public blsPerBlock;
+    uint256 public blsLastRewardsBlock;
+    uint256 public blsSpacesRewardsDebt; // bls rewards debt accumulated
+    uint256 public blsSpacesDebtLastUpdatedBlock;
+    uint256 public blsSpacesRewardsClaimed;
 
     event SpaceAdded(uint256 indexed spaceId, address indexed space, address indexed addedBy);
     event Claim(address indexed user, uint256 amount);
@@ -52,11 +53,7 @@ contract BlocksRewardsManager is Ownable {
         _;
     }
 
-    constructor(
-        IERC20 blsAddress_,
-        address blocksStakingAddress_,
-        address treasury_
-    ) {
+    constructor(IERC20 blsAddress_, address blocksStakingAddress_, address treasury_) {
         blsToken = IERC20(blsAddress_);
         blocksStaking = BlocksStaking(blocksStakingAddress_);
         treasury = payable(treasury_);
@@ -73,34 +70,75 @@ contract BlocksRewardsManager is Ownable {
         newSpace.contractAddress = spaceContract_;
         newSpace.spaceId = spaceId;
         newSpace.blsPerBlockAreaPerBlock = blsPerBlockAreaPerBlock_;
-        allBlsPerBlockAreaPerBlock = allBlsPerBlockAreaPerBlock + blsPerBlockAreaPerBlock_;
         emit SpaceAdded(spaceId, spaceContract_, msg.sender);
     }
 
     function updateBlsPerBlockAreaPerBlock(uint256 spaceId_, uint256 newAmount_) external onlyOwner {
         SpaceInfo storage space = spaceInfo[spaceId_];
         require(space.contractAddress != address(0), "SpaceInfo does not exist");
-        allBlsPerBlockAreaPerBlock = allBlsPerBlockAreaPerBlock - space.blsPerBlockAreaPerBlock + newAmount_; // Remove old amount and Add new amount
+
+        massUpdateSpaces();
+
+        uint256 oldSpaceBlsPerBlock = space.blsPerBlockAreaPerBlock * space.amountOfBlocksBought;
+        uint256 newSpaceBlsPerBlock = newAmount_ * space.amountOfBlocksBought;
+        blsPerBlock = blsPerBlock + newSpaceBlsPerBlock - oldSpaceBlsPerBlock;
         space.blsPerBlockAreaPerBlock = newAmount_;
+        
+        recalculateLastRewardBlock();
     }
 
     function pendingBlsTokens(uint256 spaceId_, address user_) public view returns (uint256) {
         SpaceInfo storage space = spaceInfo[spaceId_];
         UserInfo storage user = userInfo[spaceId_][user_];
         uint256 rewards;
-        if (user.amount > 0 && user.lastRewardCalculatedBlock < block.number) {
-            uint256 multiplier = getMultiplier(user.lastRewardCalculatedBlock);
+        if (user.amount > 0 && space.blsRewardsAccLastUpdated < block.number) {
+            uint256 multiplier = getMultiplier(space.blsRewardsAccLastUpdated);
             uint256 blsRewards = multiplier * space.blsPerBlockAreaPerBlock;
             rewards = user.amount * blsRewards;
         }
-        return user.pendingRewards + rewards;
+        return user.amount * space.blsRewardsAcc + rewards + user.pendingRewards - user.rewardsDebt;
     }
 
     function getMultiplier(uint256 usersLastRewardsCalculatedBlock) internal view returns (uint256) {
-        if (block.number > blsRewardsFinishedBlock) {
-            return blsRewardsFinishedBlock - usersLastRewardsCalculatedBlock;
+        if (block.number > blsLastRewardsBlock) {           
+            if(blsLastRewardsBlock >= usersLastRewardsCalculatedBlock){
+                return blsLastRewardsBlock - usersLastRewardsCalculatedBlock;
+            }else{
+                return 0;
+            }
         } else {
-            return block.number - usersLastRewardsCalculatedBlock;
+            return block.number - usersLastRewardsCalculatedBlock;  
+        }
+    }
+
+    function massUpdateSpaces() public {
+        uint256 length = spaceInfo.length;
+        for (uint256 spaceId = 0; spaceId < length; ++spaceId) {
+            updateSpace(spaceId);
+        }
+        
+        if(block.number > blsLastRewardsBlock){
+            blsSpacesRewardsDebt = blsSpacesRewardsDebt + (blsLastRewardsBlock - blsSpacesDebtLastUpdatedBlock) * blsPerBlock;   
+        }else{ // We are adding BLS rewards still when old ones did not run out
+            blsSpacesRewardsDebt = blsSpacesRewardsDebt + (block.number - blsSpacesDebtLastUpdatedBlock) * blsPerBlock;
+        }
+        blsSpacesDebtLastUpdatedBlock = block.number;
+    }
+
+    function updateSpace(uint256 spaceId_) internal {
+        // If space was not yet updated, update rewards accumulated
+        SpaceInfo storage space = spaceInfo[spaceId_];
+        if (block.number <= space.blsRewardsAccLastUpdated) {
+            return;
+        }
+        if (space.amountOfBlocksBought == 0) {
+            space.blsRewardsAccLastUpdated = block.number;
+            return;
+        }
+        if (block.number > space.blsRewardsAccLastUpdated) {
+            uint256 multiplierSpace = getMultiplier(space.blsRewardsAccLastUpdated);
+            space.blsRewardsAcc = space.blsRewardsAcc + multiplierSpace * space.blsPerBlockAreaPerBlock;
+            space.blsRewardsAccLastUpdated = block.number;
         }
     }
 
@@ -110,20 +148,21 @@ contract BlocksRewardsManager is Ownable {
         address[] calldata previousBlockOwners_,
         uint256[] calldata previousOwnersPrices_
     ) public payable onlySpace {
+        
+        updateSpace(spaceId_);
+
         SpaceInfo storage space = spaceInfo[spaceId_];
         UserInfo storage user = userInfo[spaceId_][buyer_];
-        uint256 blsPerBlockAreaPerBlock = space.blsPerBlockAreaPerBlock;
+        uint256 spaceBlsRewardsAcc = space.blsRewardsAcc;
 
         // If user already had some block.areas then calculate all rewards pending
-        if (user.lastRewardCalculatedBlock > 0) {
-            uint256 multiplier = getMultiplier(user.lastRewardCalculatedBlock);
-            uint256 blsRewards = multiplier * blsPerBlockAreaPerBlock;
-            user.pendingRewards = user.pendingRewards + user.amount * blsRewards;
+        if (user.amount > 0) {
+            user.pendingRewards = user.pendingRewards + user.amount * spaceBlsRewardsAcc;  
         }
         uint256 numberOfBlocksBought = previousBlockOwners_.length;
         // Set user data
         user.amount = user.amount + numberOfBlocksBought;
-        user.lastRewardCalculatedBlock = block.number;
+        user.rewardsDebt = user.amount * spaceBlsRewardsAcc;
 
         //remove blocks from previous owners that this guy took over. Max 42 loops
         uint256 allPreviousOwnersPaid;
@@ -134,10 +173,7 @@ contract BlocksRewardsManager is Ownable {
                 allPreviousOwnersPaid = allPreviousOwnersPaid + previousOwnersPrices_[i];
                 // Calculate previous users pending BLS rewards
                 UserInfo storage prevUser = userInfo[spaceId_][previousBlockOwners_[i]];
-                uint256 multiplier = getMultiplier(prevUser.lastRewardCalculatedBlock);
-                uint256 blsRewards = multiplier * blsPerBlockAreaPerBlock;
-                prevUser.pendingRewards = prevUser.pendingRewards + prevUser.amount * blsRewards;
-                prevUser.lastRewardCalculatedBlock = block.number;
+                prevUser.pendingRewards = prevUser.pendingRewards + spaceBlsRewardsAcc;
                 // Remove his ownership of block
                 --prevUser.amount;
                 ++numberOfBlocksToRemove;
@@ -146,21 +182,18 @@ contract BlocksRewardsManager is Ownable {
         uint256 numberOfBlocksAdded = numberOfBlocksBought - numberOfBlocksToRemove;
         // If amount of blocks on space changed, we need to update space and global state
         if (numberOfBlocksAdded > 0) {
-            blsRewardsAcc =
-                blsRewardsAcc +
-                (block.number - blsRewardsAccLastUpdatedBlock) *
-                allAllocationBlocks *
-                allBlsPerBlockAreaPerBlock;
-            blsRewardsAccLastUpdatedBlock = block.number;
-            allAllocationBlocks = allAllocationBlocks + numberOfBlocksAdded;
+            blsSpacesRewardsDebt = blsSpacesRewardsDebt + (block.number - blsSpacesDebtLastUpdatedBlock) * blsPerBlock;
+            blsSpacesDebtLastUpdatedBlock = block.number;
+
+            blsPerBlock = blsPerBlock + space.blsPerBlockAreaPerBlock * numberOfBlocksAdded;
             space.amountOfBlocksBought = space.amountOfBlocksBought + numberOfBlocksAdded;
+
             // Recalculate what is last block eligible for BLS rewards
             uint256 blsBalance = blsToken.balanceOf(address(this));
             // If this is true, we are still in state of distribution of rewards
-            if (blsBalance > blsRewardsAcc) {
-                uint256 blocksTillBlsRunOut = (blsBalance + blsRewardsClaimed - blsRewardsAcc) /
-                    (allBlsPerBlockAreaPerBlock * allAllocationBlocks);
-                blsRewardsFinishedBlock = block.number + blocksTillBlsRunOut;
+            if (blsBalance > blsSpacesRewardsDebt) {
+                uint256 blocksTillBlsRunOut = (blsBalance + blsSpacesRewardsClaimed - blsSpacesRewardsDebt) / blsPerBlock;
+                blsLastRewardsBlock = block.number + blocksTillBlsRunOut;
             }
         }
 
@@ -218,23 +251,14 @@ contract BlocksRewardsManager is Ownable {
 
     function claim(uint256 spaceId_) public {
         UserInfo storage user = userInfo[spaceId_][msg.sender];
-        uint256 amount = user.amount;
-        uint256 lastRewardCalculatedBlock = user.lastRewardCalculatedBlock;
-        if (amount > 0 && lastRewardCalculatedBlock < block.number) {
-            user.pendingRewards =
-                user.pendingRewards +
-                amount *
-                getMultiplier(lastRewardCalculatedBlock) *
-                spaceInfo[spaceId_].blsPerBlockAreaPerBlock;
-            user.lastRewardCalculatedBlock = block.number;
-        }
-        uint256 toClaimAmount = user.pendingRewards;
+        uint256 toClaimAmount = pendingBlsTokens(spaceId_, msg.sender);
         if (toClaimAmount > 0) {
             uint256 claimedAmount = safeBlsTransfer(msg.sender, toClaimAmount);
             emit Claim(msg.sender, claimedAmount);
             // This is also kinda check, since if user claims more than eligible, this will revert
             user.pendingRewards = toClaimAmount - claimedAmount;
-            blsRewardsClaimed = blsRewardsClaimed + claimedAmount; // Globally claimed rewards, for proper end distribution calc
+            user.rewardsDebt = spaceInfo[spaceId_].blsRewardsAcc * user.amount + claimedAmount;
+            blsSpacesRewardsClaimed = blsSpacesRewardsClaimed + claimedAmount; // Globally claimed rewards, for proper end distribution calc
         }
     }
 
@@ -276,13 +300,15 @@ contract BlocksRewardsManager is Ownable {
     function depositBlsRewardsForDistribution(uint256 amount_) external onlyOwner {
         blsToken.transferFrom(address(msg.sender), address(this), amount_);
 
-        blsRewardsAcc = blsRewardsAcc + (block.number - blsRewardsAccLastUpdatedBlock) * allAllocationBlocks * allBlsPerBlockAreaPerBlock;
-        blsRewardsAccLastUpdatedBlock = block.number;
+        massUpdateSpaces();
+        recalculateLastRewardBlock();
+    }
+
+    function recalculateLastRewardBlock() internal {
         uint256 blsBalance = blsToken.balanceOf(address(this));
-        if (blsBalance > blsRewardsAcc && allAllocationBlocks > 0) {
-            uint256 blocksTillBlsRunOut = (blsBalance + blsRewardsClaimed - blsRewardsAcc) /
-                (allBlsPerBlockAreaPerBlock * allAllocationBlocks);
-            blsRewardsFinishedBlock = block.number + blocksTillBlsRunOut;
+        if (blsBalance >= blsSpacesRewardsDebt && blsPerBlock > 0) {
+            uint256 blocksTillBlsRunOut = (blsBalance + blsSpacesRewardsClaimed - blsSpacesRewardsDebt) / blsPerBlock;
+            blsLastRewardsBlock = block.number + blocksTillBlsRunOut;
         }
     }
 
