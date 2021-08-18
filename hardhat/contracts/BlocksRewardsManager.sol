@@ -4,7 +4,7 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./BlocksStaking.sol";
-import "hardhat/console.sol";
+
 contract BlocksRewardsManager is Ownable {
     // Info of each user.
     struct UserInfo {
@@ -102,15 +102,15 @@ contract BlocksRewardsManager is Ownable {
         return user.amount * space.blsRewardsAcc + rewards + user.pendingRewards - user.rewardsDebt;
     }
 
-    function getMultiplier(uint256 usersLastRewardsCalculatedBlock) internal view returns (uint256) {
+    function getMultiplier(uint256 lastRewardCalcBlock) internal view returns (uint256) {
         if (block.number > blsLastRewardsBlock) {           
-            if(blsLastRewardsBlock >= usersLastRewardsCalculatedBlock){
-                return blsLastRewardsBlock - usersLastRewardsCalculatedBlock;
+            if(blsLastRewardsBlock >= lastRewardCalcBlock){
+                return blsLastRewardsBlock - lastRewardCalcBlock;
             }else{
                 return 0;
             }
         } else {
-            return block.number - usersLastRewardsCalculatedBlock;  
+            return block.number - lastRewardCalcBlock;  
         }
     }
 
@@ -118,13 +118,12 @@ contract BlocksRewardsManager is Ownable {
         uint256 length = spaceInfo.length;
         for (uint256 spaceId = 0; spaceId < length; ++spaceId) {
             updateSpace(spaceId);
-        }
-        
-        if(block.number > blsLastRewardsBlock){
-            blsSpacesRewardsDebt = blsSpacesRewardsDebt + (blsLastRewardsBlock - blsSpacesDebtLastUpdatedBlock) * blsPerBlock;   
-        }else{ // We are adding BLS rewards still when old ones did not run out
-            blsSpacesRewardsDebt = blsSpacesRewardsDebt + (block.number - blsSpacesDebtLastUpdatedBlock) * blsPerBlock;
-        }
+        }      
+        updateManagerState();
+    }
+
+    function updateManagerState() internal {
+        blsSpacesRewardsDebt = blsSpacesRewardsDebt + getMultiplier(blsSpacesDebtLastUpdatedBlock) * blsPerBlock;
         blsSpacesDebtLastUpdatedBlock = block.number;
     }
 
@@ -193,8 +192,9 @@ contract BlocksRewardsManager is Ownable {
 
         // If amount of blocks on space changed, we need to update space and global state
         if (numberOfBlocksAddedToSpace > 0) {
-            blsSpacesRewardsDebt = blsSpacesRewardsDebt + (block.number - blsSpacesDebtLastUpdatedBlock) * blsPerBlock;
-            blsSpacesDebtLastUpdatedBlock = block.number;
+            // blsSpacesRewardsDebt = blsSpacesRewardsDebt + (block.number - blsSpacesDebtLastUpdatedBlock) * blsPerBlock;
+            // blsSpacesDebtLastUpdatedBlock = block.number;
+            updateManagerState();
 
             blsPerBlock = blsPerBlock + space.blsPerBlockAreaPerBlock * numberOfBlocksAddedToSpace;
             space.amountOfBlocksBought = space.amountOfBlocksBought + numberOfBlocksAddedToSpace;

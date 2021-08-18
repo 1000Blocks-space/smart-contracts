@@ -2,8 +2,8 @@ pragma solidity ^0.8.0;
 //SPDX-License-Identifier: MIT
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "./BLSToken.sol";
 
 /**
  * @dev This contract implements the logic for staking BLS amount. It
@@ -11,7 +11,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * over (that got covered) and rewards for staked BLS amount.
  */
 contract BlocksStaking is Ownable {
-    using SafeERC20 for IERC20;
+    using SafeERC20 for BLSToken;
 
     // Object with information for a user
     struct UserInfo {
@@ -20,37 +20,40 @@ contract BlocksStaking is Ownable {
         uint256 takeoverReward; // Reward for covered blocks
     }
 
-    uint256 public rewardsDistributionPeriod = 42 days / 3; // How long are we distributing incoming rewards
-
+    uint256 constant BURN_PERCENT_WITHDRAWAL = 1; // Withdrawals burning 1% of your tokens. Deflationary, adding value
+    uint256 public rewardsDistributionPeriod = 24 days / 3; // How long are we distributing incoming rewards
     // Global staking variables
     uint256 public totalTokens; // Total amount of amount currently staked
     uint256 public rewardsPerBlock; // Multiplied by 1e12 for better division precision
     uint256 public rewardsFinishedBlock; // When will rewards distribution end
-    uint256 accRewardsPerShare; // Accumulated rewards per share
-    uint256 lastRewardCalculatedBlock; // Last time we calculated accumulation of rewards per share
-    uint256 allUsersRewardDebt; // Helper to keep track of proper account balance for distribution
-    uint256 takeoverRewards; // Helper to keep track of proper account balance for distribution
+    uint256 public accRewardsPerShare; // Accumulated rewards per share
+    uint256 public lastRewardCalculatedBlock; // Last time we calculated accumulation of rewards per share
+    uint256 public allUsersRewardDebt; // Helper to keep track of proper account balance for distribution
+    uint256 public takeoverRewards; // Helper to keep track of proper account balance for distribution
 
     // Mapping of UserInfo object to a wallet
     mapping(address => UserInfo) public userInfo;
 
     // The BLS token contract
-    IERC20 private blsToken;
+    BLSToken private blsToken;
 
     // Event that is triggered when a user claims his rewards
     event Claim(address indexed user, uint256 reward);
     event Withdraw(address indexed user, uint256 amount);
+    event EmergencyWithdraw(address indexed user, uint256 amount);
     event Deposit(address indexed user, uint256 amount);
+    event RewardDistributionPeriodSet(uint256 period);
 
     /**
      * @dev Provides addresses for BLS token contract
      */
-    constructor(IERC20 blsTokenAddress_) {
-        blsToken = IERC20(blsTokenAddress_);
+    constructor(BLSToken blsTokenAddress_) {
+        blsToken = BLSToken(blsTokenAddress_);
     }
 
     function setRewardDistributionPeriod(uint256 period_) external onlyOwner {
         rewardsDistributionPeriod = period_;
+        emit RewardDistributionPeriodSet(period_);
     }
 
     // View function to see pending BLSs on frontend.
@@ -73,17 +76,28 @@ contract BlocksStaking is Ownable {
     }
 
     function getMultiplier() internal view returns (uint256) {
-        if (block.number > rewardsFinishedBlock && rewardsFinishedBlock >= lastRewardCalculatedBlock) {
-            return rewardsFinishedBlock - lastRewardCalculatedBlock;
-        } else {
+        if (block.number > rewardsFinishedBlock) {
+            if(rewardsFinishedBlock >= lastRewardCalculatedBlock){
+                return rewardsFinishedBlock - lastRewardCalculatedBlock;
+            }else{
+                return 0;
+            }
+        }else{
             return block.number - lastRewardCalculatedBlock;
         }
+    }
+
+    function updateState() internal {
+        if(totalTokens > 0){
+            accRewardsPerShare = accRewardsPerShare + (rewardsPerBlock * getMultiplier()) / totalTokens;
+        }
+        lastRewardCalculatedBlock = block.number;
     }
 
     /**
      * @dev The user deposits BLS amount for staking.
      */
-    function deposit(uint256 amount_) public {
+    function deposit(uint256 amount_) external {
         UserInfo storage user = userInfo[msg.sender];
         // if there are staked amount, fully harvest current reward
         if (user.amount > 0) {
@@ -91,56 +105,80 @@ contract BlocksStaking is Ownable {
         }
 
         if (totalTokens > 0) {
-            accRewardsPerShare = accRewardsPerShare + (rewardsPerBlock * getMultiplier()) / totalTokens;
+            updateState();
         } else {
             calculateRewardsDistribution(); // Means first time any user deposits, so start distributing
-        }
-
-        lastRewardCalculatedBlock = block.number;
+            lastRewardCalculatedBlock = block.number;
+        }    
 
         totalTokens = totalTokens + amount_; // sum of total staked amount
+        uint256 userRewardDebtBefore = (accRewardsPerShare * user.amount) / 1e12;
         user.amount = user.amount + amount_; // cache staked amount count for this wallet
         user.rewardDebt = (accRewardsPerShare * user.amount) / 1e12; // cache current total reward per token
-        allUsersRewardDebt = allUsersRewardDebt + (accRewardsPerShare * user.amount) / 1e12;
+        allUsersRewardDebt = allUsersRewardDebt + (accRewardsPerShare * user.amount) / 1e12 - userRewardDebtBefore;
         emit Deposit(msg.sender, amount_);
         // Transfer BLS amount from the user to this contract
         blsToken.safeTransferFrom(address(msg.sender), address(this), amount_);
     }
 
     /**
-     * @dev The user withdraws staked BLS amount.
+     * @dev The user withdraws staked BLS amount and claims the rewards.
      */
-    function withdraw() public {
+    function withdraw() external {
         UserInfo storage user = userInfo[msg.sender];
-        require(user.amount > 0, "No amount deposited for withdrawal.");
+        uint256 amount = user.amount;
+        require(amount > 0, "No amount deposited for withdrawal.");
         // Claim any available rewards
         claim();
 
-        // Update rewards per share because total tokens change
-        accRewardsPerShare = accRewardsPerShare + (rewardsPerBlock * getMultiplier()) / totalTokens;
-        lastRewardCalculatedBlock = block.number;
-
-        uint256 amount = user.amount;
         totalTokens = totalTokens - amount;
         user.amount = 0;
         user.rewardDebt = 0;
+        // If after withdraw, there is noone else staking and there are still rewards to be distributed, then reset rewards debt
+        if(totalTokens == 0 && rewardsFinishedBlock > block.number){
+            allUsersRewardDebt = 0;
+        }
+
+        uint256 burnAmount = amount * BURN_PERCENT_WITHDRAWAL / 100;
+        blsToken.burn(burnAmount);
 
         // Transfer BLS amount from this contract to the user
-        uint256 amountWithdrawn = safeBlsTransfer(address(msg.sender), amount);
+        uint256 amountWithdrawn = safeBlsTransfer(address(msg.sender), amount - burnAmount);
         emit Withdraw(msg.sender, amountWithdrawn);
+    }
+    
+    /**
+     * @dev The user just withdraws staked BLS amount and leaves any rewards.
+     */
+    function emergencyWithdraw() public {
+        UserInfo storage user = userInfo[msg.sender];
+
+        uint256 amount = user.amount;
+        user.amount = 0;
+        user.rewardDebt = 0;
+
+        uint256 burnAmount = amount * BURN_PERCENT_WITHDRAWAL / 100;
+        blsToken.burn(burnAmount);
+
+        // Transfer BLS amount from this contract to the user
+        uint256 amountWithdrawn = safeBlsTransfer(address(msg.sender), amount - burnAmount);
+        emit EmergencyWithdraw(msg.sender, amountWithdrawn);
     }
 
     /**
      * @dev Claim rewards from staking and covered blocks.
      */
     function claim() public {
-        uint256 reward = pendingRewards(msg.sender);
+        // Update contract state
+        updateState();
 
+        uint256 reward = pendingRewards(msg.sender);
         if (reward <= 0) return; // skip if no rewards
 
         UserInfo storage user = userInfo[msg.sender];
         takeoverRewards = takeoverRewards - user.takeoverReward;
-        user.rewardDebt = 0; // reset: cache current total reward per token
+        user.rewardDebt = (accRewardsPerShare * user.amount) / 1e12; // reset: cache current total reward per token
+        allUsersRewardDebt = allUsersRewardDebt + reward - user.takeoverReward;
         user.takeoverReward = 0; // reset takeover reward
 
         // transfer reward in BNBs to the user
@@ -152,7 +190,7 @@ contract BlocksStaking is Ownable {
     /**
      * @dev Distribute rewards for covered blocks, what remains goes for staked amount.
      */
-    function distributeRewards(address[] calldata addresses_, uint256[] calldata rewards_) public payable {
+    function distributeRewards(address[] calldata addresses_, uint256[] calldata rewards_) external payable {
         uint256 tmpTakeoverRewards;
         for (uint256 i = 0; i < addresses_.length; ++i) {
             // process each reward for covered blocks
@@ -164,8 +202,7 @@ contract BlocksStaking is Ownable {
         // what remains is the reward for staked amount
         if (msg.value - tmpTakeoverRewards > 0 && totalTokens > 0) {
             // Update rewards per share because balance changes
-            accRewardsPerShare = accRewardsPerShare + (rewardsPerBlock * getMultiplier()) / totalTokens;
-            lastRewardCalculatedBlock = block.number;
+            updateState();
             calculateRewardsDistribution();
         }
     }

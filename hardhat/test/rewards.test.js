@@ -502,7 +502,7 @@ describe("Testing BlocksRewardsManager", function() {
       
     });
 
-    // TODO: test where rewards run out in between. Then pending
+    // BUGFIX
     it("should properly distribute rewards after same user buys multiple times and someone already bought before. Then takeover of 12 blocks happens. all while rewards deposited run out", async function() {
 
       await setupWithBlsDoposit(1000, 1);
@@ -559,27 +559,62 @@ describe("Testing BlocksRewardsManager", function() {
       expect(pendingTokensB, "B should be 0 pending bls").to.equal(0);
 
 
-      // B now takes over 12 blocks from A. Before: A = 47, B = 4
+      // B now takes over 12 blocks from A. Before: A = 47, B = 4 
       await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0705", "0705", "imagehash1", {value: 100}); // B = +4
       // A has +47 rewards in pipeline. All together pending: 
       pendingTokensA = await rewardsManagerContract.pendingBlsTokens(0, walletA.address);
       expect(pendingTokensA, "A should have 235 + 47 - 282 bls").to.equal(282);
       pendingTokensB = await rewardsManagerContract.pendingBlsTokens(0, walletB.address);
-      expect(pendingTokensB, "A should have 1 * 4 bls").to.equal(4);
-      // Reards here : A = 46 B = 5
-      // await mineBlocks(10);
+      expect(pendingTokensB, "B should have 1 * 4 bls").to.equal(4);
 
-      // pendingTokensA = await rewardsManagerContract.pendingBlsTokens(0, walletA.address);
-      // expect(pendingTokensA, "A should have 282 + 10 * 46 bls").to.equal(742);
-      // pendingTokensB = await rewardsManagerContract.pendingBlsTokens(0, walletB.address);
-      // expect(pendingTokensB, "A should have 54 bls").to.equal(54);
+      expect((await blsContract.balanceOf(rewardsManagerContract.address)).toNumber(), "Balance of contract is 286").to.equal(286);
+      // Here A = 46, B = 5 
+      // If at this point we would claim, then we run out of rewards. What happens nexT? Noone knows...
+      await mineBlocks(3);
 
-      // await mineBlocks(9);
+      // ITs actually not true that noone knows, we know! Rewards stay same...
+      pendingTokensA = await rewardsManagerContract.pendingBlsTokens(0, walletA.address);
+      expect(pendingTokensA, "A should still have 282 bls").to.equal(282);
+      pendingTokensB = await rewardsManagerContract.pendingBlsTokens(0, walletB.address);
+      expect(pendingTokensB, "B should have 4 bls").to.equal(4);
 
-      // await rewardsManagerContract.connect(walletA).claim(0);
-      // await expect((await blsContract.balanceOf(walletA.address)).toNumber(), "walletA bls END should be 530").to.equal(530);
-      // await rewardsManagerContract.connect(walletB).claim(0);
-      // await expect((await blsContract.balanceOf(walletB.address)).toNumber(), "walletB bls END should be 176").to.equal(176);
+      // Now all users claim last rewards
+      await rewardsManagerContract.connect(walletA).claim(0);
+      await rewardsManagerContract.connect(walletB).claim(0);
+
+      let balanceAEnd = (await blsContract.balanceOf(walletA.address)).toNumber();
+      let balanceBEnd = (await blsContract.balanceOf(walletB.address)).toNumber();
+      let balanceOfContractEnd = (await blsContract.balanceOf(rewardsManagerContract.address)).toNumber();
+
+      await expect(balanceAEnd + balanceBEnd, "Sum of all claims needs to be same as initial BLS deposit to contract minus balance").to.equal(1000-balanceOfContractEnd);
+      
+      await mineBlocks(4);
+      // B purchases 9 blocks additionally
+      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("1412", "1614", "imagehash1", {value: 10});
+      await mineBlocks(2);
+      // Now using A = 46, B = 14 => 60 per block 
+      await blsContract.approve(rewardsManagerContract.address, 2000);
+      await rewardsManagerContract.depositBlsRewardsForDistribution(1000);
+
+      await mineBlocks(18); // Rewards run out again
+
+      pendingTokensA = await rewardsManagerContract.pendingBlsTokens(0, walletA.address);
+      expect(pendingTokensA, "A should have 736X bls").to.equal(736);
+      pendingTokensB = await rewardsManagerContract.pendingBlsTokens(0, walletB.address);
+      expect(pendingTokensB, "A should have 224 bls").to.equal(224);
+      
+      await rewardsManagerContract.connect(walletA).claim(0);
+      let balanceBBeforeEnd = (await blsContract.balanceOf(walletB.address)).toNumber();
+      await rewardsManagerContract.connect(walletB).claim(0);
+
+      balanceAEnd = (await blsContract.balanceOf(walletA.address)).toNumber();  
+      balanceBEnd = (await blsContract.balanceOf(walletB.address)).toNumber();
+
+      balanceOfContractEnd = (await blsContract.balanceOf(rewardsManagerContract.address)).toNumber();
+      expect(balanceBEnd - balanceBBeforeEnd, "B should have 224 bls at end").to.equal(224);
+
+      await expect(balanceAEnd + balanceBEnd, "Sum of all claims needs to be same as initial BLS deposit to contract minus balance").to.equal(2000-balanceOfContractEnd);
+      
     });
 
     it("should work properly if first tokens are added to contract, then space is added", async function() {

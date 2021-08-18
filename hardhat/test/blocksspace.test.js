@@ -36,15 +36,7 @@ describe("Testing BlocksSpace", function() {
     await ethers.provider.send('evm_mine');
   }
 
-  // describe.only("Scenario: Purchasing posters", function() {
 
-  //   it("Setup and check ERC20 compatibility", async function() {
-  //     [owner, walletA] = await ethers.getSigners(); // simulate different wallets
-  //     await setup();
-  //     let transfer = await blsContract.connect(walletA).transfer(owner.address, 1);
-  //     console.log(transfer);
-  //   });
-  // });
   describe("Scenario: Purchasing posters", function() {
 
     it("Setup", async function() {
