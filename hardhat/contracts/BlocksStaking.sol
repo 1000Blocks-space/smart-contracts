@@ -1,4 +1,4 @@
-pragma solidity ^0.8.0;
+pragma solidity 0.8.5;
 //SPDX-License-Identifier: MIT
 
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -156,6 +156,7 @@ contract BlocksStaking is Ownable {
         uint256 amount = user.amount;
         user.amount = 0;
         user.rewardDebt = 0;
+        user.takeoverReward = 0;
 
         uint256 burnAmount = amount * BURN_PERCENT_WITHDRAWAL / 100;
         blsToken.burn(burnAmount);

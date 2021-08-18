@@ -1,9 +1,10 @@
-pragma solidity ^0.8.0;
+pragma solidity 0.8.5;
 //SPDX-License-Identifier: MIT
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./BlocksStaking.sol";
+
 
 contract BlocksRewardsManager is Ownable {
     // Info of each user.
@@ -192,8 +193,7 @@ contract BlocksRewardsManager is Ownable {
 
         // If amount of blocks on space changed, we need to update space and global state
         if (numberOfBlocksAddedToSpace > 0) {
-            // blsSpacesRewardsDebt = blsSpacesRewardsDebt + (block.number - blsSpacesDebtLastUpdatedBlock) * blsPerBlock;
-            // blsSpacesDebtLastUpdatedBlock = block.number;
+
             updateManagerState();
 
             blsPerBlock = blsPerBlock + space.blsPerBlockAreaPerBlock * numberOfBlocksAddedToSpace;
@@ -254,7 +254,7 @@ contract BlocksRewardsManager is Ownable {
         // Send fees to treasury. Max together 15%. We use call, because it enables auto liqudity provisioning on DEX in future when token is trading
         if (feesTaken > 0) {
             (bool sent,) = treasury.call{value: feesTaken}("");
-            require(sent, "Failed to send Ether");
+            require(sent, "Failed to send moneyz");
         }
 
         return (rewardReceived_ - feesTaken, previousOwnersRewardWei);

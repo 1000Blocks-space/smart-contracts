@@ -1,4 +1,4 @@
-pragma solidity ^0.8.0;
+pragma solidity 0.8.5;
 //SPDX-License-Identifier: MIT
 
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -37,27 +37,23 @@ contract BlocksSpace is Ownable {
     }
 
     uint256 constant PRICE_OF_LOGO_BLOCKS = 42 ether;
-    uint256 public immutable spaceId;
     BlocksRewardsManager public rewardsPool;
     uint256 public minTimeBetweenPurchases = 42 hours;
     mapping(uint256 => Block) public blocks;
     mapping(address => UserState) public users;
     
-    event RewardsPoolContractUpdated(address add);
     event MinTimeBetweenPurchasesUpdated(uint256 inSeconds);
     event BlocksAreaPurchased(address indexed blocksAreaOwner, uint256 blocksBought, uint256 paid);
 
-    constructor(address rewardsPoolContract_, uint256 spaceId_) {
+    constructor(address rewardsPoolContract_) {
         rewardsPool = BlocksRewardsManager(rewardsPoolContract_);
         setPriceOfLogoBlocks(0, 301);
-        spaceId = spaceId_;
     }
 
     function setPriceOfLogoBlocks(uint256 startBlockId_, uint256 endBlockId_) internal {
         // 0 - 301
         (uint256 startBlockX, uint256 startBlockY) = (startBlockId_ / 100, startBlockId_ % 100);
         (uint256 endBlockX, uint256 endBlockY) = (endBlockId_ / 100, endBlockId_ % 100);
-
         for (uint256 i = startBlockX; i <= endBlockX; ++i) {
             for (uint256 j = startBlockY; j <= endBlockY; ++j) {
                 Block storage currentBlock = blocks[i * 100 + j];

@@ -21,7 +21,7 @@ describe("Testing BlocksStaking", function() {
     const contractObject2 = await ethers.getContractFactory("BlocksRewardsManager");
     rewardsManagerContract = await contractObject2.deploy(blsContract.address, blocksStakingContract.address, owner.address);
     const contractObject3 = await ethers.getContractFactory("BlocksSpace");
-    blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address, 0);
+    blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address);
     await rewardsManagerContract.addSpace(blocksSpaceContract.address, 1);
     await blsContract.transfer(rewardsManagerContract.address, 1000);
   }
@@ -1301,25 +1301,23 @@ describe("Testing BlocksStaking", function() {
       await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0002", "0002", "imagehash1", {value: 100});
     });
 
-    // it.only("should return proper amount of tokens after withdrawal", async function() {
-    //   await setup(); // 1000 bls and 1 bls per block
-    //   await blocksStakingContract.setRewardDistributionPeriod(10); // X blocks
-    //   await blocksSpaceContract.updateMinTimeBetweenPurchases(1);
-    //   // A purchase 4 block
-    //   await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0402", "0503", "imagehash1", {value: 100});
-    //   await mineBlocks(3);
-    //   expect(await rewardsManagerContract.pendingBlsTokens(0, walletA.address), "There should be 12 pending BLS").to.equal(12);
-    //   await rewardsManagerContract.connect(walletA).claim(0);
-    //   await mineBlocks(3);
-    //   await blsContract.connect(walletA).approve(blocksStakingContract.address, 1000);
-    //   await blocksStakingContract.connect(walletA).deposit(16);
-    //   await mineBlocks(3);
-    //   await blocksStakingContract.connect(walletA).claim();
-    //   await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0206", "0207", "imagehash1", {value: 100});
-    //   await mineBlocks(8);
-    //   await blocksStakingContract.connect(walletA).claim();
-    //   await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0002", "0002", "imagehash1", {value: 100});
-    // });
+    it("should properly handle withdrawal burning fee", async function() {
+      await setup();
+      await blsContract.transfer(walletA.address, 200);
+      await blsContract.transfer(walletB.address, 10);
+      await blsContract.connect(walletA).approve(blocksStakingContract.address, 200);
+      await blsContract.connect(walletB).approve(blocksStakingContract.address, 10);
+
+      await blocksStakingContract.connect(walletA).deposit(200, {gasPrice:0});
+      await blocksStakingContract.connect(walletA).withdraw({gasPrice:0});
+      expect(await blsContract.balanceOf(walletA.address)).to.equal(198);
+      await mineBlocks(3);
+      await blocksStakingContract.connect(walletB).deposit(10, {gasPrice:0});
+      await mineBlocks(3);
+      await blocksStakingContract.connect(walletB).withdraw({gasPrice:0});
+      expect(await blsContract.balanceOf(walletB.address)).to.equal(10);
+    });
   });
 
 });
+

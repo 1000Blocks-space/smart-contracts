@@ -19,7 +19,7 @@ describe("Testing BlocksSpace", function() {
     const contractObject2 = await ethers.getContractFactory("BlocksRewardsManager");
     rewardsManagerContract = await contractObject2.deploy(blsContract.address, blocksStaking.address, owner.address);
     const contractObject3 = await ethers.getContractFactory("BlocksSpace");
-    blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address, 0);
+    blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address);
     await rewardsManagerContract.addSpace(blocksSpaceContract.address, 5);
     await blsContract.transfer(rewardsManagerContract.address, 1000);
   }
@@ -179,3 +179,4 @@ describe("Testing BlocksSpace", function() {
 
   });
 });
+

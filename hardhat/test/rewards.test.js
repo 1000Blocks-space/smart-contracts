@@ -24,7 +24,7 @@ describe("Testing BlocksRewardsManager", function() {
     const contractObject2 = await ethers.getContractFactory("BlocksRewardsManager");
     rewardsManagerContract = await contractObject2.deploy(blsContract.address, blocksStaking.address, owner.address);
     const contractObject3 = await ethers.getContractFactory("BlocksSpace");
-    blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address, 0);
+    blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address);
     await rewardsManagerContract.addSpace(blocksSpaceContract.address, blsPerBlock);
     await blsContract.transfer(rewardsManagerContract.address, amountOfBls);
   }
@@ -38,9 +38,9 @@ describe("Testing BlocksRewardsManager", function() {
     const contractObject2 = await ethers.getContractFactory("BlocksRewardsManager");
     rewardsManagerContract = await contractObject2.deploy(blsContract.address, blocksStaking.address, owner.address);
     const contractObject3 = await ethers.getContractFactory("BlocksSpace");
-    blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address, 0);
+    blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address);
     const contractObject4 = await ethers.getContractFactory("BlocksSpace");
-    blocksSpace2Contract = await contractObject4.deploy(rewardsManagerContract.address, 1);
+    blocksSpace2Contract = await contractObject4.deploy(rewardsManagerContract.address);
     await rewardsManagerContract.addSpace(blocksSpaceContract.address, space1BlsPerBlock);
     await rewardsManagerContract.addSpace(blocksSpace2Contract.address, space2BlsPerBlock);
     await blsContract.transfer(rewardsManagerContract.address, amountOfBls);
@@ -628,7 +628,7 @@ describe("Testing BlocksRewardsManager", function() {
       const contractObject2 = await ethers.getContractFactory("BlocksRewardsManager");
       rewardsManagerContract = await contractObject2.deploy(blsContract.address, blocksStaking.address, owner.address);
       const contractObject3 = await ethers.getContractFactory("BlocksSpace");
-      blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address, 0);
+      blocksSpaceContract = await contractObject3.deploy(rewardsManagerContract.address);
 
       await blsContract.approve(rewardsManagerContract.address, 1000);
       await rewardsManagerContract.depositBlsRewardsForDistribution(1000);
@@ -843,7 +843,7 @@ describe("Testing BlocksRewardsManager", function() {
 
       // Now we get another space into action with BLS per block = 10
       const contractObject4 = await ethers.getContractFactory("BlocksSpace");
-      blocksSpace2Contract = await contractObject4.deploy(rewardsManagerContract.address, 1); // Transaction mined
+      blocksSpace2Contract = await contractObject4.deploy(rewardsManagerContract.address); // Transaction mined
       await rewardsManagerContract.addSpace(blocksSpace2Contract.address, 10); // Transaction mined
       
       pendingTokensA = await rewardsManagerContract.pendingBlsTokens(0, walletA.address);
@@ -903,7 +903,7 @@ describe("Testing BlocksRewardsManager", function() {
 
       // Now we get another space into action with BLS per block = 10
       const contractObject4 = await ethers.getContractFactory("BlocksSpace");
-      blocksSpace2Contract = await contractObject4.deploy(rewardsManagerContract.address, 1); // Transaction mined
+      blocksSpace2Contract = await contractObject4.deploy(rewardsManagerContract.address); // Transaction mined
       await rewardsManagerContract.addSpace(blocksSpace2Contract.address, 10); // Transaction mined
       
       // Now user C 2 blocks on space 0
@@ -939,3 +939,4 @@ describe("Testing BlocksRewardsManager", function() {
 // // 9 blocks
 // await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0407", "0609", "imagehash1", {value: 10});
       
+
