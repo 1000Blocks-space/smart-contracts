@@ -4,8 +4,7 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./BlocksStaking.sol";
-
-
+import "hardhat/console.sol";
 contract BlocksRewardsManager is Ownable {
     // Info of each user.
     struct UserInfo {
@@ -37,7 +36,7 @@ contract BlocksRewardsManager is Ownable {
     BlocksStaking public blocksStaking;
     SpaceInfo[] public spaceInfo;
     mapping(uint256 => mapping(address => UserInfo)) public userInfo;
-    mapping(address => bool) public spacesByAddress;
+    mapping(address => uint256) public spaceIdMapping; // Not 0 based, but starts with id = 1
     // Variables that support calculation of proper bls rewards distributions
     uint256 public blsPerBlock;
     uint256 public blsLastRewardsBlock;
@@ -47,11 +46,13 @@ contract BlocksRewardsManager is Ownable {
 
     event SpaceAdded(uint256 indexed spaceId, address indexed space, address indexed addedBy);
     event Claim(address indexed user, uint256 amount);
-
-    modifier onlySpace() {
-        require(spacesByAddress[msg.sender] == true, "Not a space.");
-        _;
-    }
+    event BlsPerBlockAreaPerBlockUpdated(uint256 spaceId, uint256 newAmount);
+    event TreasuryFeeSet(uint256 newFee);
+    event LiquidityFeeSet(uint256 newFee);
+    event PreviousOwnerFeeSet(uint256 newFee);
+    event BlocksStakingContractUpdated(address add);
+    event TreasuryWalletUpdated(address newWallet);
+    event BlsRewardsForDistributionDeposited(uint256 amount);
 
     constructor(IERC20 blsAddress_, address blocksStakingAddress_, address treasury_) {
         blsToken = IERC20(blsAddress_);
@@ -64,8 +65,9 @@ contract BlocksRewardsManager is Ownable {
     }
 
     function addSpace(address spaceContract_, uint256 blsPerBlockAreaPerBlock_) external onlyOwner {
-        spacesByAddress[spaceContract_] = true;
-        uint256 spaceId = spaceInfo.length;
+        require(spaceIdMapping[spaceContract_] == 0, "Space is already added.");
+        uint256 spaceId = spaceInfo.length; 
+        spaceIdMapping[spaceContract_] = spaceId + 1; // Only here numbering is not 0 indexed, because of check above
         SpaceInfo storage newSpace = spaceInfo.push();
         newSpace.contractAddress = spaceContract_;
         newSpace.spaceId = spaceId;
@@ -85,6 +87,7 @@ contract BlocksRewardsManager is Ownable {
         space.blsPerBlockAreaPerBlock = newAmount_;
         
         recalculateLastRewardBlock();
+        emit BlsPerBlockAreaPerBlockUpdated(spaceId_, newAmount_);
     }
 
     function pendingBlsTokens(uint256 spaceId_, address user_) public view returns (uint256) {
@@ -143,12 +146,15 @@ contract BlocksRewardsManager is Ownable {
     }
 
     function blocksAreaBoughtOnSpace(
-        uint256 spaceId_,
         address buyer_,
         address[] calldata previousBlockOwners_,
         uint256[] calldata previousOwnersPrices_
-    ) public payable onlySpace {
-        
+    ) external payable {
+
+        // Here calling contract should be space and noone else
+        uint256 spaceId_ = spaceIdMapping[msg.sender];
+        require(spaceId_ > 0, "Call not from BlocksSpace");
+        spaceId_ = spaceId_ - 1; // because this is now index
         updateSpace(spaceId_);
 
         SpaceInfo storage space = spaceInfo[spaceId_];
@@ -157,36 +163,41 @@ contract BlocksRewardsManager is Ownable {
 
         // If user already had some block.areas then calculate all rewards pending
         if (user.amount > 0) {
-            user.pendingRewards = user.pendingRewards + user.amount * spaceBlsRewardsAcc;  
+            user.pendingRewards = pendingBlsTokens(spaceId_, buyer_);
         }
-        uint256 numberOfBlocksBought = previousBlockOwners_.length;
-        // Set user data
-        user.amount = user.amount + numberOfBlocksBought;
-        user.rewardsDebt = user.amount * spaceBlsRewardsAcc;
-
-        //remove blocks from previous owners that this guy took over. Max 42 loops
+        
+        uint256 numberOfBlocksAddedToSpace;        
         uint256 allPreviousOwnersPaid;
-        uint256 numberOfBlocksToRemove;
-        for (uint256 i = 0; i < numberOfBlocksBought; ++i) {
-            // If previous owners of block are non zero address, means we need to take block from them
-            if (previousBlockOwners_[i] != address(0)) {
-                allPreviousOwnersPaid = allPreviousOwnersPaid + previousOwnersPrices_[i];
-                // Calculate previous users pending BLS rewards
-                UserInfo storage prevUser = userInfo[spaceId_][previousBlockOwners_[i]];
-                prevUser.pendingRewards = prevUser.pendingRewards + spaceBlsRewardsAcc;
-                // Remove his ownership of block
-                --prevUser.amount;
-                ++numberOfBlocksToRemove;
+        { // Stack too deep scoping
+            //remove blocks from previous owners that this guy took over. Max 42 loops
+            uint256 numberOfBlocksBought = previousBlockOwners_.length;      
+            uint256 numberOfBlocksToRemove;
+            for (uint256 i = 0; i < numberOfBlocksBought; ++i) {
+                // If previous owners of block are non zero address, means we need to take block from them
+                if (previousBlockOwners_[i] != address(0)) {
+                    allPreviousOwnersPaid = allPreviousOwnersPaid + previousOwnersPrices_[i];
+                    // Calculate previous users pending BLS rewards
+                    UserInfo storage prevUser = userInfo[spaceId_][previousBlockOwners_[i]];
+                    prevUser.pendingRewards = pendingBlsTokens(spaceId_, previousBlockOwners_[i]);
+                    // Remove his ownership of block
+                    --prevUser.amount;
+                    prevUser.rewardsDebt = prevUser.amount * spaceBlsRewardsAcc;
+                    ++numberOfBlocksToRemove;
+                }
             }
-        }
-        uint256 numberOfBlocksAdded = numberOfBlocksBought - numberOfBlocksToRemove;
+            numberOfBlocksAddedToSpace = numberOfBlocksBought - numberOfBlocksToRemove;
+            // Set user data
+            user.amount = user.amount + numberOfBlocksBought;
+            user.rewardsDebt = user.amount * spaceBlsRewardsAcc; // Reset debt, because at top we gave him rewards already
+        }      
+
         // If amount of blocks on space changed, we need to update space and global state
-        if (numberOfBlocksAdded > 0) {
+        if (numberOfBlocksAddedToSpace > 0) {
             blsSpacesRewardsDebt = blsSpacesRewardsDebt + (block.number - blsSpacesDebtLastUpdatedBlock) * blsPerBlock;
             blsSpacesDebtLastUpdatedBlock = block.number;
 
-            blsPerBlock = blsPerBlock + space.blsPerBlockAreaPerBlock * numberOfBlocksAdded;
-            space.amountOfBlocksBought = space.amountOfBlocksBought + numberOfBlocksAdded;
+            blsPerBlock = blsPerBlock + space.blsPerBlockAreaPerBlock * numberOfBlocksAddedToSpace;
+            space.amountOfBlocksBought = space.amountOfBlocksBought + numberOfBlocksAddedToSpace;
 
             // Recalculate what is last block eligible for BLS rewards
             uint256 blsBalance = blsToken.balanceOf(address(this));
@@ -249,7 +260,8 @@ contract BlocksRewardsManager is Ownable {
         return (rewardReceived_ - feesTaken, previousOwnersRewardWei);
     }
 
-    function claim(uint256 spaceId_) public {
+    function claim(uint256 spaceId_) external {
+        updateSpace(spaceId_);
         UserInfo storage user = userInfo[spaceId_][msg.sender];
         uint256 toClaimAmount = pendingBlsTokens(spaceId_, msg.sender);
         if (toClaimAmount > 0) {
@@ -257,7 +269,7 @@ contract BlocksRewardsManager is Ownable {
             emit Claim(msg.sender, claimedAmount);
             // This is also kinda check, since if user claims more than eligible, this will revert
             user.pendingRewards = toClaimAmount - claimedAmount;
-            user.rewardsDebt = spaceInfo[spaceId_].blsRewardsAcc * user.amount + claimedAmount;
+            user.rewardsDebt = spaceInfo[spaceId_].blsRewardsAcc * user.amount;
             blsSpacesRewardsClaimed = blsSpacesRewardsClaimed + claimedAmount; // Globally claimed rewards, for proper end distribution calc
         }
     }
@@ -277,24 +289,29 @@ contract BlocksRewardsManager is Ownable {
     function setTreasuryFee(uint256 newFee_) external onlyOwner {
         require(newFee_ <= MAX_TREASURY_FEE);
         treasuryFee = newFee_;
+        emit TreasuryFeeSet(newFee_);
     }
 
     function setLiquidityFee(uint256 newFee_) external onlyOwner {
         require(newFee_ <= MAX_LIQUIDITY_FEE);
         liquidityFee = newFee_;
+        emit LiquidityFeeSet(newFee_);
     }
 
     function setPreviousOwnerFee(uint256 newFee_) external onlyOwner {
         require(newFee_ <= MAX_PREVIOUS_OWNER_FEE);
         previousOwnerFee = newFee_;
+        emit PreviousOwnerFeeSet(newFee_);
     }
 
-    function updateBlocksStatingContract(address address_) external onlyOwner {
+    function updateBlocksStakingContract(address address_) external onlyOwner {
         blocksStaking = BlocksStaking(address_);
+        emit BlocksStakingContractUpdated(address_);
     }
 
     function updateTreasuryWallet(address newWallet_) external onlyOwner {
         treasury = payable(newWallet_);
+        emit TreasuryWalletUpdated(newWallet_);
     }
 
     function depositBlsRewardsForDistribution(uint256 amount_) external onlyOwner {
@@ -302,6 +319,8 @@ contract BlocksRewardsManager is Ownable {
 
         massUpdateSpaces();
         recalculateLastRewardBlock();
+
+        emit BlsRewardsForDistributionDeposited(amount_);    
     }
 
     function recalculateLastRewardBlock() internal {

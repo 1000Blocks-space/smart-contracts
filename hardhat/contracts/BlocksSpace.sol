@@ -107,7 +107,6 @@ contract BlocksSpace is Ownable {
         // 3. Transactions
         // Send fresh info to RewardsPool contract, so buyer gets some sweet rewards
         rewardsPool.blocksAreaBoughtOnSpace{value: paymentReceived}(
-            spaceId,
             msg.sender,
             previousBlockOwners,
             previousOwnersPrices
