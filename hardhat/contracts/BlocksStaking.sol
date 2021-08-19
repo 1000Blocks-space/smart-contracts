@@ -115,7 +115,7 @@ contract BlocksStaking is Ownable {
         uint256 userRewardDebtBefore = (accRewardsPerShare * user.amount) / 1e12;
         user.amount = user.amount + amount_; // cache staked amount count for this wallet
         user.rewardDebt = (accRewardsPerShare * user.amount) / 1e12; // cache current total reward per token
-        allUsersRewardDebt = allUsersRewardDebt + (accRewardsPerShare * user.amount) / 1e12 - userRewardDebtBefore;
+        allUsersRewardDebt = allUsersRewardDebt + user.rewardDebt - userRewardDebtBefore;
         emit Deposit(msg.sender, amount_);
         // Transfer BLS amount from the user to this contract
         blsToken.safeTransferFrom(address(msg.sender), address(this), amount_);
@@ -132,12 +132,15 @@ contract BlocksStaking is Ownable {
         claim();
 
         totalTokens = totalTokens - amount;
-        user.amount = 0;
-        user.rewardDebt = 0;
         // If after withdraw, there is noone else staking and there are still rewards to be distributed, then reset rewards debt
         if(totalTokens == 0 && rewardsFinishedBlock > block.number){
             allUsersRewardDebt = 0;
+        }else{
+            // Deduct whatever was added when it was claimed
+            allUsersRewardDebt = allUsersRewardDebt - user.rewardDebt;
         }
+        user.amount = 0;
+        user.rewardDebt = 0;
 
         uint256 burnAmount = amount * BURN_PERCENT_WITHDRAWAL / 100;
         blsToken.burn(burnAmount);
