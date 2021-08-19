@@ -157,6 +157,8 @@ contract BlocksStaking is Ownable {
         UserInfo storage user = userInfo[msg.sender];
 
         uint256 amount = user.amount;
+        totalTokens = totalTokens - amount;
+        allUsersRewardDebt = allUsersRewardDebt - user.rewardDebt;
         user.amount = 0;
         user.rewardDebt = 0;
         user.takeoverReward = 0;

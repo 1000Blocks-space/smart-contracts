@@ -1339,7 +1339,6 @@ describe("Testing BlocksStaking", function() {
       await blocksStakingContract.connect(walletB).deposit(19);                         // 1 transaction
       expect(await blocksStakingContract.pendingRewards(walletA.address), "There should be 20 pending rewards").to.equal(20);
       // B deposits. 10pb, 20t, 0.5pt
-
       await mineBlocks(5); // 5 transaction
 
       await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0909", "1111", "imagehash1", {value: 100}); // 1 transaction
@@ -1409,6 +1408,144 @@ describe("Testing BlocksStaking", function() {
       expect(rewA + rewB + rewC + rewD, "Pending rewards should be less than input").to.be.lessThan(1000 + 1000 + 500 + 2000 + 4000 + 1000);
     });
 
+    // BUG
+    it("should properly calculate allUsersRewardDebt when emergencyWithdrawal happens", async function() {
+      await setup(); // 1000 bls and 1 bls per block
+      await blocksStakingContract.setRewardDistributionPeriod(10); // X blocks
+      await blocksSpaceContract.updateMinTimeBetweenPurchases(0);
+      await rewardsManagerContract.setTreasuryFee(0);
+      await rewardsManagerContract.setLiquidityFee(0);
+      await blsContract.transfer(walletA.address, 20);
+      await blsContract.connect(walletA).approve(blocksStakingContract.address, 1000);
+      await blsContract.transfer(walletB.address, 2000);
+      await blsContract.connect(walletB).approve(blocksStakingContract.address, 1000);
+      await blsContract.transfer(walletC.address, 50);
+
+      await blocksStakingContract.connect(walletA).deposit(1);
+      // A purchase 4 block
+      await blocksSpaceContract.connect(walletC).purchaseBlocksArea("0402", "0503", "imagehash1", {value: 1000});
+      await mineBlocks(6); // 100 per block
+      await blocksStakingContract.connect(walletB).deposit(1); // 700 distributed to A, now A = 50, B = 50
+      expect((await blocksStakingContract.pendingRewards(walletA.address)).toNumber() , "Pending rewards from A before deposit are").to.equal(700);
+      await blocksStakingContract.connect(walletB).emergencyWithdraw(); // B leaves 50 rewards, pusy
+      await blocksSpaceContract.connect(walletC).purchaseBlocksArea("0604", "0706", "imagehash1", {value: 1000});
+      await mineBlocks(12);
+      expect((await blocksStakingContract.pendingRewards(walletA.address)).toNumber() , "Pending rewards from A should be 2000").to.equal(2000);
+    });
+
+    it("should properly calculate allUsersRewardDebt when emergencyWithdrawal happens", async function() {
+      await setup(); // 1000 bls and 1 bls per block
+      await blocksStakingContract.setRewardDistributionPeriod(10); // X blocks
+      await blocksSpaceContract.updateMinTimeBetweenPurchases(0);
+      await rewardsManagerContract.setTreasuryFee(0);
+      await rewardsManagerContract.setLiquidityFee(0);
+      await blsContract.transfer(walletA.address, 20);
+      await blsContract.connect(walletA).approve(blocksStakingContract.address, 1000);
+      await blsContract.transfer(walletB.address, 2000);
+      await blsContract.connect(walletB).approve(blocksStakingContract.address, 1000);
+      await blsContract.transfer(walletC.address, 50);
+      let balanceWalletAbefore = await ethers.provider.getBalance(walletA.address);
+      let balanceWalletBbefore = await ethers.provider.getBalance(walletB.address);
+      let balanceWalletCbefore = await ethers.provider.getBalance(walletC.address);
+
+      await blocksStakingContract.connect(walletA).deposit(1, {gasPrice:0});
+      // A purchase 4 block
+      await blocksSpaceContract.connect(walletC).purchaseBlocksArea("0402", "0503", "imagehash1", {value: 1000, gasPrice:0});
+      await mineBlocks(6); // 100 per block
+      await blocksStakingContract.connect(walletB).deposit(1, {gasPrice:0}); // 700 distributed to A, now A = 50, B = 50
+      await blocksStakingContract.connect(walletB).emergencyWithdraw({gasPrice:0}); // B leaves 50 rewards, pusy
+      await blocksSpaceContract.connect(walletC).purchaseBlocksArea("0604", "0706", "imagehash1", {value: 1000, gasPrice:0});
+      await mineBlocks(11);
+      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("1818", "2020", "imagehash1", {value: 500, gasPrice:0});
+      await rewardsManagerContract.connect(walletA).claim(0, {gasPrice:0});
+      await blsContract.connect(walletA).approve(blocksStakingContract.address, 1000, {gasPrice:0});
+      await blocksStakingContract.connect(walletA).deposit(1, {gasPrice:0});
+      await blsContract.connect(walletC).approve(blocksStakingContract.address, 1000, {gasPrice:0});
+      await blocksStakingContract.connect(walletC).deposit(50, {gasPrice:0});
+      await mineBlocks(9);
+      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0909", "1111", "imagehash1", {value: 2000, gasPrice:0});
+      await blocksStakingContract.connect(walletA).emergencyWithdraw({gasPrice:0});
+      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("1818", "2020", "imagehash1", {value: 4000, gasPrice:0});
+      await blocksStakingContract.connect(walletC).withdraw({gasPrice:0});
+      await mineBlocks(11);
+      await blsContract.connect(walletB).approve(blocksStakingContract.address, 2000, {gasPrice:0});
+      await blocksStakingContract.connect(walletB).deposit(10, {gasPrice:0});
+      await mineBlocks(3);
+      await blocksSpaceContract.connect(walletD).purchaseBlocksArea("2010", "2414", "imagehaa", {value: 1000, gasPrice:0});
+      await mineBlocks(8);
+
+      let rewA = await blocksStakingContract.pendingRewards(walletA.address);
+      let rewB = await blocksStakingContract.pendingRewards(walletB.address);
+      let rewC = await blocksStakingContract.pendingRewards(walletC.address);
+      let balanceWalletAAfter = await ethers.provider.getBalance(walletA.address);
+      let balanceWalletBAfter = await ethers.provider.getBalance(walletB.address);
+      let balanceWalletCAfter = await ethers.provider.getBalance(walletC.address);
+
+      expect((balanceWalletAAfter.sub(balanceWalletAbefore).add(rewA)
+      .add(balanceWalletBAfter).sub(balanceWalletBbefore).add(rewB)
+      .add(balanceWalletCAfter).sub(balanceWalletCbefore).add(rewC)).toNumber(), "Pending rewards should be less than input").to.be.lessThan(1000 + 1000 + 500 + 2000 + 4000 + 1000);
+    });
+
+    it("should properly calculate allUsersRewardDebt when emergencyWithdrawal happens", async function() {
+      await setup(); // 1000 bls and 1 bls per block
+      await blocksStakingContract.setRewardDistributionPeriod(10); // X blocks
+      await blocksSpaceContract.updateMinTimeBetweenPurchases(0);
+      await rewardsManagerContract.setTreasuryFee(0);
+      await rewardsManagerContract.setLiquidityFee(0);
+      await blsContract.transfer(walletA.address, 20);
+      await blsContract.connect(walletA).approve(blocksStakingContract.address, 1000);
+      await blsContract.transfer(walletB.address, 2000);
+      await blsContract.connect(walletB).approve(blocksStakingContract.address, 1000);
+      await blsContract.transfer(walletC.address, 50);
+      let balanceWalletAbefore = await ethers.provider.getBalance(walletA.address);
+      let balanceWalletBbefore = await ethers.provider.getBalance(walletB.address);
+      let balanceWalletCbefore = await ethers.provider.getBalance(walletC.address);
+
+      await blocksStakingContract.connect(walletA).deposit(1, {gasPrice:0});
+      // A purchase 4 block
+      await blocksSpaceContract.connect(walletC).purchaseBlocksArea("0402", "0503", "imagehash1", {value: 1000, gasPrice:0});
+      await mineBlocks(6); // 100 per block
+      await blocksStakingContract.connect(walletB).deposit(1, {gasPrice:0}); // 700 distributed to A, now A = 50, B = 50
+      await blocksStakingContract.connect(walletB).emergencyWithdraw({gasPrice:0}); // B leaves 50 rewards, pusy
+      await blocksSpaceContract.connect(walletC).purchaseBlocksArea("0604", "0706", "imagehash1", {value: 1000, gasPrice:0});
+      await mineBlocks(11);
+      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("1818", "2020", "imagehash1", {value: 500, gasPrice:0});
+      await mineBlocks(3);
+      await blocksSpaceContract.connect(walletC).purchaseBlocksArea("1818", "2020", "imagehash1", {value: 1500, gasPrice:0});
+      await rewardsManagerContract.connect(walletA).claim(0, {gasPrice:0});
+      await blsContract.connect(walletA).approve(blocksStakingContract.address, 1000, {gasPrice:0});
+      await blocksStakingContract.connect(walletA).deposit(15, {gasPrice:0});
+      await blsContract.connect(walletC).approve(blocksStakingContract.address, 1000, {gasPrice:0});
+      await blocksStakingContract.connect(walletC).deposit(50, {gasPrice:0});
+      await mineBlocks(9);
+      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0909", "1111", "imagehash1", {value: 2000, gasPrice:0});
+      await blocksStakingContract.connect(walletB).emergencyWithdraw({gasPrice:0});
+      await mineBlocks(7);
+      await blocksStakingContract.connect(walletB).deposit(300, {gasPrice:0});
+      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("1818", "2020", "imagehash1", {value: 4000, gasPrice:0});
+      await blocksStakingContract.connect(walletC).withdraw({gasPrice:0});
+      await mineBlocks(11);
+      await blsContract.connect(walletB).approve(blocksStakingContract.address, 2000, {gasPrice:0});
+      await blocksStakingContract.connect(walletB).deposit(10, {gasPrice:0});
+      await mineBlocks(3);
+      await blocksSpaceContract.connect(walletD).purchaseBlocksArea("2010", "2414", "imagehaa", {value: 1000, gasPrice:0});
+      await mineBlocks(12);
+
+      let rewA = await blocksStakingContract.pendingRewards(walletA.address);
+      let rewB = await blocksStakingContract.pendingRewards(walletB.address);
+      let rewC = await blocksStakingContract.pendingRewards(walletC.address);
+      let balanceWalletAAfter = await ethers.provider.getBalance(walletA.address);
+      let balanceWalletBAfter = await ethers.provider.getBalance(walletB.address);
+      let balanceWalletCAfter = await ethers.provider.getBalance(walletC.address);
+      let allA = (balanceWalletAAfter.sub(balanceWalletAbefore).add(rewA)).toNumber();
+      let allB = (balanceWalletBAfter.sub(balanceWalletBbefore).add(rewB)).toNumber();
+      let allC = (balanceWalletCAfter.sub(balanceWalletCbefore).add(rewC)).toNumber();
+      // console.log(allA);
+      // console.log(allB);
+      // console.log(allC);
+      expect(allA+allB+allC, "Pending rewards should be less than input").to.lte(1000 + 1500 + 1000 + 500 + 2000 + 4000 + 1000);
+    });
+  
 
 
   });
