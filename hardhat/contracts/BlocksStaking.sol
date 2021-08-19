@@ -112,7 +112,7 @@ contract BlocksStaking is Ownable {
         }    
 
         totalTokens = totalTokens + amount_; // sum of total staked amount
-        uint256 userRewardDebtBefore = (accRewardsPerShare * user.amount) / 1e12;
+        uint256 userRewardDebtBefore = user.rewardDebt;
         user.amount = user.amount + amount_; // cache staked amount count for this wallet
         user.rewardDebt = (accRewardsPerShare * user.amount) / 1e12; // cache current total reward per token
         allUsersRewardDebt = allUsersRewardDebt + user.rewardDebt - userRewardDebtBefore;

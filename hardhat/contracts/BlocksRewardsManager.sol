@@ -67,6 +67,7 @@ contract BlocksRewardsManager is Ownable {
 
     function addSpace(address spaceContract_, uint256 blsPerBlockAreaPerBlock_) external onlyOwner {
         require(spaceIdMapping[spaceContract_] == 0, "Space is already added.");
+        require(spaceInfo.length < 20, "Max spaces limit reached.");
         uint256 spaceId = spaceInfo.length; 
         spaceIdMapping[spaceContract_] = spaceId + 1; // Only here numbering is not 0 indexed, because of check above
         SpaceInfo storage newSpace = spaceInfo.push();
@@ -200,12 +201,7 @@ contract BlocksRewardsManager is Ownable {
             space.amountOfBlocksBought = space.amountOfBlocksBought + numberOfBlocksAddedToSpace;
 
             // Recalculate what is last block eligible for BLS rewards
-            uint256 blsBalance = blsToken.balanceOf(address(this));
-            // If this is true, we are still in state of distribution of rewards
-            if (blsBalance > blsSpacesRewardsDebt) {
-                uint256 blocksTillBlsRunOut = (blsBalance + blsSpacesRewardsClaimed - blsSpacesRewardsDebt) / blsPerBlock;
-                blsLastRewardsBlock = block.number + blocksTillBlsRunOut;
-            }
+            recalculateLastRewardBlock();
         }
 
         // Calculate and subtract fees in first part
@@ -325,7 +321,7 @@ contract BlocksRewardsManager is Ownable {
 
     function recalculateLastRewardBlock() internal {
         uint256 blsBalance = blsToken.balanceOf(address(this));
-        if (blsBalance >= blsSpacesRewardsDebt && blsPerBlock > 0) {
+        if (blsBalance + blsSpacesRewardsClaimed >= blsSpacesRewardsDebt && blsPerBlock > 0) {
             uint256 blocksTillBlsRunOut = (blsBalance + blsSpacesRewardsClaimed - blsSpacesRewardsDebt) / blsPerBlock;
             blsLastRewardsBlock = block.number + blocksTillBlsRunOut;
         }

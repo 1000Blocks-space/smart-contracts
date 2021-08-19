@@ -284,6 +284,28 @@ describe("Testing BlocksRewardsManager", function() {
       expect(blsBalanceAfter.toNumber(), "Since we couldnt distribute all rewards properly, there are 14 bls left").to.equal(14);
     });
 
+    //BUG: IDX-013 Incorrect Condition
+    it("should distribute all rewards that are in pool, but not more.", async function() {
+      await setupWithBlsDoposit(120, 1);
+      // A purchases 4 blocks
+      await blocksSpaceContract.connect(walletA).purchaseBlocksArea("0402", "0503", "img1", {value: 10});
+
+      await mineBlocks(18); 
+      await rewardsManagerContract.connect(walletA).claim(0); // user has now 76 blocks to claim
+      let walletABlsBalance = (await blsContract.balanceOf(walletA.address)).toNumber();
+      await expect(walletABlsBalance, "walletA bls should be").to.equal(76);
+      
+      // B purchases 4 blocks
+      await blocksSpaceContract.connect(walletB).purchaseBlocksArea("0204", "0305", "img2", {value: 10}); // 80 reserved already
+      // From now on, there are 40 rewards remaining, should it should distribute all in 5 blocks. Each 4 
+
+      await mineBlocks(8);
+      
+      let pendingA = (await rewardsManagerContract.pendingBlsTokens(0, walletA.address)).toNumber();
+      let pendingB = (await rewardsManagerContract.pendingBlsTokens(0, walletB.address)).toNumber();
+      expect(pendingA + pendingB + walletABlsBalance, "All rewards after finish should be less than input").to.be.lte(120);
+    });
+
     // BUG: Not proper reward debt calculations
     it("should properly distribute rewards after same user buys multiple times", async function() {
 
