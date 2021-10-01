@@ -149,7 +149,7 @@ contract BlocksRewardsManager2 is Ownable {
     function blocksAreaBoughtOnSpace(
         address buyer_,
         address[] calldata previousBlockOwners_,
-        uint256[] calldata previousOwnersPrices_
+        uint256[] calldata previousOwnersBlsRewards_
     ) external payable {
 
         // Here calling contract should be space and noone else
@@ -176,10 +176,9 @@ contract BlocksRewardsManager2 is Ownable {
             for (uint256 i = 0; i < numberOfBlocksBought; ++i) {
                 // If previous owners of block are non zero address, means we need to take block from them
                 if (previousBlockOwners_[i] != address(0)) {
-                    allPreviousOwnersPaid = allPreviousOwnersPaid + previousOwnersPrices_[i];
                     // Calculate previous users pending BLS rewards
                     UserInfo storage prevUser = userInfo[spaceId_][previousBlockOwners_[i]];
-                    prevUser.pendingRewards = pendingBlsTokens(spaceId_, previousBlockOwners_[i]);
+                    prevUser.pendingRewards = previousOwnersBlsRewards_[i] + pendingBlsTokens(spaceId_, previousBlockOwners_[i]);
                     // Remove his ownership of block
                     --prevUser.amount;
                     prevUser.rewardsDebt = prevUser.amount * spaceBlsRewardsAcc;
@@ -208,7 +207,7 @@ contract BlocksRewardsManager2 is Ownable {
         // In second part, calculate how much rewards are being rewarded to previous block owners
         (uint256 rewardToForward, uint256[] memory prevOwnersRewards) = calculateAndDistributeFees(
             msg.value,
-            previousOwnersPrices_,
+            previousOwnersBlsRewards_,
             allPreviousOwnersPaid
         );
 
@@ -218,10 +217,10 @@ contract BlocksRewardsManager2 is Ownable {
 
     function calculateAndDistributeFees(
         uint256 rewardReceived_,
-        uint256[] calldata previousOwnersPrices_,
+        uint256[] calldata previousOwnersBlsRewards_,
         uint256 previousOwnersPaid_
     ) internal returns (uint256, uint256[] memory) {
-        uint256 numberOfBlocks = previousOwnersPrices_.length;
+        uint256 numberOfBlocks = previousOwnersBlsRewards_.length;
         uint256 feesTaken;
         uint256 previousOwnersFeeValue;
         uint256[] memory previousOwnersRewardWei = new uint256[](numberOfBlocks);
@@ -230,7 +229,7 @@ contract BlocksRewardsManager2 is Ownable {
             uint256 onePartForPreviousOwners = (previousOwnersFeeValue * 1e9) / previousOwnersPaid_; // Then calculate one part for previous owners sum
             for (uint256 i = 0; i < numberOfBlocks; ++i) {
                 // Now we calculate exactly how much one user gets depending on his investment (it needs to be proportionally)
-                previousOwnersRewardWei[i] = (onePartForPreviousOwners * previousOwnersPrices_[i]) / 1e9;
+                previousOwnersRewardWei[i] = (onePartForPreviousOwners * previousOwnersBlsRewards_[i]) / 1e9;
             }
         }
         // Can be max 5%
