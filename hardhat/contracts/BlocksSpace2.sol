@@ -1,4 +1,4 @@
-pragma solidity ^0.8.5;
+pragma solidity 0.8.5;
 //SPDX-License-Identifier: MIT
 
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -40,16 +40,17 @@ contract BlocksSpace2 is Ownable {
         uint256 lastPurchase;
     }
 
-    uint256 public blockClaimPrice = 10 * 1e15; // 0.01 BNB
     uint256 constant PRICE_OF_LOGO_BLOCKS = 42 ether;
     BlocksRewardsManager2 public rewardsPool;
     BLSToken public blsToken;
+    uint256 public blockClaimPrice = 42 * 1e14; // 0.0042 BNB
     uint256 public minTimeBetweenPurchases = 4 hours + 20 minutes;
     uint256 public maxBlsTakeoverAmount = 420 ether;
-    uint256 public minBlsTakeoverAmount = 20 ether;
-    uint256 public blsTakeoverTimeInBlocks = 42 * 60 * 60 / 3; // Amount of blocks that pass before high BLS rewards drop to base. (42 hours)
-    uint256 public blsFreeTimeInBlocks = 1 * 60 * 60 / 3; // Amount of blocks that pass when there is 0 BLS for takeover (1h)
+    uint256 public minBlsTakeoverAmount = 24 ether;
+    uint256 public blsTakeoverTimeInBlocks = 40 * 60 * 60 / 3; // Amount of blocks that pass before high BLS rewards drop to base. (40 hours)
+    uint256 public blsFreeTimeInBlocks = 2 * 60 * 60 / 3; // Amount of blocks that pass when there is 0 BLS for takeover (2h)
     uint256 public blsTakeoverBurnPercents = 24; // Amount of BLS from fees that are burned
+    uint256 public blsBurned; // Amount of BLS that were burned already
     uint256 blsTakeoverDecreasePerBlock = maxBlsTakeoverAmount / blsTakeoverTimeInBlocks;
     mapping(uint256 => Block) public blocks;
     mapping(address => UserState) public users;
@@ -101,27 +102,35 @@ contract BlocksSpace2 is Ownable {
             block.timestamp >= users[msg.sender].lastPurchase + minTimeBetweenPurchases,
             "You must wait between buys"
         );
-        require(isBlocksAreaValid(blocksArea), "BlocksArea invalid");
+        require(isBlocksAreaValid(blocksArea), "blocksArea invalid");
         require(bytes(imghash_).length != 0, "Image hash cannot be empty");
 
         uint256 numberOfBlocks = calculateSizeOfBlocksArea(blocksArea);
         require(paymentReceived == (blockClaimPrice * numberOfBlocks), "You should pay exact amount");
-        // Here we need to check if he paid enough BLS for takeover
 
-        // console.log("numberOfBlocks", numberOfBlocks);
-        BlockView[] memory blocks = getPricesOfBlocks(startBlockId_, endBlockId_);
+        // Here we need to check if he paid enough BLS for takeover
+        BlockView[] memory blocksStatus = getPricesOfBlocks(startBlockId_, endBlockId_);
         uint256 blsTakeoverFullPrice;
         uint256 blsTakeoverPrevOwnersFees;
         address[] memory previousBlockOwners = new address[](numberOfBlocks);
         uint256[] memory previousOwnersBlsTakeover = new uint256[](numberOfBlocks);
-        for(uint256 i; i < numberOfBlocks; ++i){
-            uint256 blsTakeoverRewardPrevOwner = (100 - blsTakeoverBurnPercents) * blocks[i].priceBls / 100;
-            blsTakeoverPrevOwnersFees = blsTakeoverPrevOwnersFees + blsTakeoverRewardPrevOwner;
-            previousBlockOwners[i] = blocks[i].owner;
-            previousOwnersBlsTakeover[i] = blsTakeoverRewardPrevOwner;
-            blsTakeoverFullPrice = blsTakeoverFullPrice + blocks[i].priceBls;
+        {
+            uint256 tempMinTakeover = minBlsTakeoverAmount;
+            for(uint256 i; i < numberOfBlocks; ++i){
+                if(blocksStatus[i].priceBls == tempMinTakeover){
+                    previousOwnersBlsTakeover[i] = 0;
+                }else{
+                    uint256 blsTakeoverRewardPrevOwner = (100 - blsTakeoverBurnPercents) * blocksStatus[i].priceBls / 100;
+                    blsTakeoverPrevOwnersFees = blsTakeoverPrevOwnersFees + blsTakeoverRewardPrevOwner;  
+                    previousOwnersBlsTakeover[i] = blsTakeoverRewardPrevOwner;
+                }
+                blsTakeoverFullPrice = blsTakeoverFullPrice + blocksStatus[i].priceBls;
+                previousBlockOwners[i] = blocksStatus[i].owner;
+            }
         }
 
+        require(allowedMaxBls_ >= blsTakeoverFullPrice, "Allowance not correct");
+        
         // 2. Token Transactions and burning
         // Transfer amount of tokens for cover to this contract
         blsToken.transferFrom(msg.sender, address(this), blsTakeoverFullPrice);
@@ -129,6 +138,7 @@ contract BlocksSpace2 is Ownable {
         blsToken.transfer(address(rewardsPool), blsTakeoverPrevOwnersFees);
         // burn the rest
         blsToken.burn(blsTakeoverFullPrice - blsTakeoverPrevOwnersFees);
+        blsBurned = blsBurned + (blsTakeoverFullPrice - blsTakeoverPrevOwnersFees);
 
         // 3. Storage operations
         calculateBlocksOwnershipChanges(blocksArea, numberOfBlocks);
@@ -142,15 +152,15 @@ contract BlocksSpace2 is Ownable {
     }
 
     function calculateBlocksOwnershipChanges(
-        BlockAreaLocation memory blocksArea,
+        BlockAreaLocation memory blocksArea_,
         uint256 numberOfBlocks_
     ) internal returns (address[] memory, uint256[] memory) {
         // Go through all blocks that were paid for
         address[] memory previousBlockOwners = new address[](numberOfBlocks_);
         uint256[] memory previousOwnersPrices = new uint256[](numberOfBlocks_);
         uint256 arrayIndex;
-        for (uint256 i = blocksArea.startBlockX; i <= blocksArea.endBlockX; ++i) {
-            for (uint256 j = blocksArea.startBlockY; j <= blocksArea.endBlockY; ++j) {
+        for (uint256 i = blocksArea_.startBlockX; i <= blocksArea_.endBlockX; ++i) {
+            for (uint256 j = blocksArea_.startBlockY; j <= blocksArea_.endBlockY; ++j) {
                 //Set new state of the Block
                 Block storage currentBlock = blocks[i * 100 + j];
                 currentBlock.price = blockClaimPrice; // Set constant price
@@ -178,22 +188,23 @@ contract BlocksSpace2 is Ownable {
     }
 
     function getPricesOfBlocks(uint256 startBlockId_, uint256 endBlockId_) public view returns (BlockView[] memory) {
-        BlockAreaLocation memory blocksArea = BlockAreaLocation(
+        BlockAreaLocation memory blocksAreaLocal = BlockAreaLocation(
             startBlockId_ / 100,
             startBlockId_ % 100,
             endBlockId_ / 100,
             endBlockId_ % 100
         );
 
-        require(isBlocksAreaValid(blocksArea), "blocksArea invalid");
+        require(isBlocksAreaValid(blocksAreaLocal), "blocksArea invalid");
 
         BlockView[42] memory blockAreaTemp;
         uint256 arrayCounter;
-        for (uint256 i = blocksArea.startBlockX; i <= blocksArea.endBlockX; ++i) {
-            for (uint256 j = blocksArea.startBlockY; j <= blocksArea.endBlockY; ++j) {
+        for (uint256 i = blocksAreaLocal.startBlockX; i <= blocksAreaLocal.endBlockX; ++i) {
+            for (uint256 j = blocksAreaLocal.startBlockY; j <= blocksAreaLocal.endBlockY; ++j) {
                 uint16 index = uint16(i * 100 + j);
                 Block memory currentBlock = blocks[index];
-                uint256 takeoverPriceBls;
+                uint256 takeoverPriceBls = 0;
+
                 // Checking if block was already claimed, because that is important for takeover price in BLS
                 if(currentBlock.blockWhenClaimed > 0){
                     // blsTakeoverTimeInBlocks
@@ -226,22 +237,22 @@ contract BlocksSpace2 is Ownable {
         return blockArea;
     }
 
-    function calculateSizeOfBlocksArea(BlockAreaLocation memory blocksArea) internal view returns (uint256) {
+    function calculateSizeOfBlocksArea(BlockAreaLocation memory blocksArea_) internal pure returns (uint256) {
         uint256 numberOfBlocks;
-        for (uint256 i = blocksArea.startBlockX; i <= blocksArea.endBlockX; ++i) {
-            for (uint256 j = blocksArea.startBlockY; j <= blocksArea.endBlockY; ++j) {
+        for (uint256 i = blocksArea_.startBlockX; i <= blocksArea_.endBlockX; ++i) {
+            for (uint256 j = blocksArea_.startBlockY; j <= blocksArea_.endBlockY; ++j) {
                 ++numberOfBlocks;
             }
         }
         return numberOfBlocks;
     }
 
-    function isBlocksAreaValid(BlockAreaLocation memory blocksArea) internal view returns (bool) {
-        require(blocksArea.startBlockX < 42 && blocksArea.endBlockX < 42, "X blocks out of range. Oh Why?");
-        require(blocksArea.startBlockY < 24 && blocksArea.endBlockY < 24, "Y blocks out of range. Oh Why?");
+    function isBlocksAreaValid(BlockAreaLocation memory blocksArea_) internal pure returns (bool) {
+        require(blocksArea_.startBlockX < 42 && blocksArea_.endBlockX < 42, "X blocks out of range. Oh Why?");
+        require(blocksArea_.startBlockY < 24 && blocksArea_.endBlockY < 24, "Y blocks out of range. Oh Why?");
 
-        uint256 blockWidth = blocksArea.endBlockX - blocksArea.startBlockX + 1; // +1 because its including
-        uint256 blockHeight = blocksArea.endBlockY - blocksArea.startBlockY + 1; // +1 because its including
+        uint256 blockWidth = blocksArea_.endBlockX - blocksArea_.startBlockX + 1; // +1 because its including
+        uint256 blockHeight = blocksArea_.endBlockY - blocksArea_.startBlockY + 1; // +1 because its including
         uint256 blockArea = blockWidth * blockHeight;
 
         return blockWidth <= 7 && blockHeight <= 7 && blockArea <= 42;

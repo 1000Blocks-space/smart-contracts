@@ -34,7 +34,7 @@ describe("Testing BlocksRewardsManager", function() {
     await blocksSpace2Contract.updateBlsFreeTimeInBlocks(15); // 5 blocks free
     await blocksSpace2Contract.updateBlsTakeoverTimeInBlocks(30); // 10 blocks then we are flat
     await blocksSpace2Contract.updateMaxBlsTakeoverAmount(420);
-    await blocksSpace2Contract.updateMinBlsTakeoverAmount(20);
+    await blocksSpace2Contract.updateMinBlsTakeoverAmount(24);
     await blocksSpace2Contract.updateBlockClaimPrice(100);
     await blocksSpace2Contract.updateBlsTakeoverBurnPercents(20);
     MAX_BLS_TAKEOVER = (await blocksSpace2Contract.maxBlsTakeoverAmount()).toNumber();
@@ -123,20 +123,20 @@ describe("Testing BlocksRewardsManager", function() {
       expect(pendingTokens).to.equal(BLS_5_PER_BLOCK * 10);
     });
 
-    it.only("Purchase 1 block.area so rewards should rise with time", async function() {
-      // Rewards should start with 24, then after 10 blocks they should yield 42 and they should stay at 42 then
-      await setupWithBlsDoposit(bls(1000), bls(24));
-      await blocksSpace2Contract.purchaseBlocksArea("0402", "0402", "imagehash1", 0, {value: PRICE_OF_BLOCK});
-      await mineBlocks(1);
-      let pendingTokens = await rewardsManager2Contract.pendingBlsTokens(0, owner.address);
-      expect(pendingTokens, "There should be 24 pending BLS").to.equal(bls(24));
-      await mineBlocks(9);
-      // Here we are after 10 blocks. Now rewards should be 42 BLS per block.
-      let startPendingTokens = await rewardsManager2Contract.pendingBlsTokens(0, owner.address);
-      await mineBlocks(1);
-      let endPendingTokens = await rewardsManager2Contract.pendingBlsTokens(0, owner.address);
-      expect(endPendingTokens.sub(startPendingTokens)).to.equal(bls(42));
-    });
+    // it.only("Purchase 1 block.area so rewards should rise with time", async function() {
+    //   // Rewards should start with 24, then after 10 blocks they should yield 42 and they should stay at 42 then
+    //   await setupWithBlsDoposit(bls(1000), bls(24));
+    //   await blocksSpace2Contract.purchaseBlocksArea("0402", "0402", "imagehash1", 0, {value: PRICE_OF_BLOCK});
+    //   await mineBlocks(1);
+    //   let pendingTokens = await rewardsManager2Contract.pendingBlsTokens(0, owner.address);
+    //   expect(pendingTokens, "There should be 24 pending BLS").to.equal(bls(24));
+    //   await mineBlocks(9);
+    //   // Here we are after 10 blocks. Now rewards should be 42 BLS per block.
+    //   let startPendingTokens = await rewardsManager2Contract.pendingBlsTokens(0, owner.address);
+    //   await mineBlocks(1);
+    //   let endPendingTokens = await rewardsManager2Contract.pendingBlsTokens(0, owner.address);
+    //   expect(endPendingTokens.sub(startPendingTokens)).to.equal(bls(42));
+    // });
 
     it("Rewards of 2 purchases of non overlapping block.areas", async function() {
       await setupWithBlsDoposit(1000);
@@ -273,6 +273,92 @@ describe("Testing BlocksRewardsManager", function() {
       expect(diff, "Treasury should not change").to.equal(10); //Because liqudiity fees are still applied
     });
 
+    it("Staking pool should receive 85% of rewards", async function() {
+      await rewardsManager2Contract.connect(owner).setTreasuryFee(5);
+      let balanceBefore = await ethers.provider.getBalance(blocksStaking.address);
+      await blocksSpace2Contract.connect(walletC).purchaseBlocksArea("0502", "0502", "imagehash1", 0, {value: PRICE_OF_BLOCK});
+      let balanceAfter = await ethers.provider.getBalance(blocksStaking.address);
+      let diff = balanceAfter.sub(balanceBefore);
+      expect(diff, "Should have 85% of block pay value").to.equal(85); //Because liqudiity fees are still applied
+    });
+
+  });
+
+  describe("Scenario: BLS burning mechanism", function() {
+
+    it("should burn 20% of BLS if takeover happens where you need to pay BLS for takeover", async function() {
+      await setupWithBlsDoposit(1000);
+      await blsGiveAndApproveSpace(walletB, 10000); 
+      const initialAmountOfBls = await blsContract.totalSupply();
+      expect(initialAmountOfBls, "42 mio at begining").to.be.equal(bls(42000000));
+      await blocksSpace2Contract.connect(walletA).purchaseBlocksArea("1212", "1212", "imagehash1", 0, {value: PRICE_OF_BLOCK});
+      await mineBlocks(2);
+      const priceOfBlockAreaOnNextBlock = await getPricesOfBlocksArea("1212", "1212", 1);
+      const priceOfBlockAreaOnNextBlockBig = BigNumber.from(priceOfBlockAreaOnNextBlock.toString());
+
+      await blocksSpace2Contract.connect(walletB).purchaseBlocksArea("1212", "1212", "imagehash2", priceOfBlockAreaOnNextBlock, {value: PRICE_OF_BLOCK});
+      const takeoverWas = priceOfBlockAreaOnNextBlockBig.mul(10).mul(8).div(100);
+      const finalAmountOfBls = await blsContract.totalSupply();
+      expect(initialAmountOfBls.sub(finalAmountOfBls), "final amount needs to be less").to.be.equal(priceOfBlockAreaOnNextBlockBig.sub(takeoverWas));
+
+    });
+
+    it("should burn 0 of BLS if takeover happens after purchase and when takeover price goes to 0", async function() {
+      await setupWithBlsDoposit(1000);
+      await blsGiveAndApproveSpace(walletB, 10000); 
+      const initialAmountOfBls = await blsContract.totalSupply();
+      expect(initialAmountOfBls, "42 mio at begining").to.be.equal(bls(42000000));
+      await blocksSpace2Contract.connect(walletA).purchaseBlocksArea("1212", "1212", "imagehash1", 0, {value: PRICE_OF_BLOCK});
+      await mineBlocks(10);
+      await blocksSpace2Contract.connect(walletB).purchaseBlocksArea("1212", "1212", "imagehash2", 0, {value: PRICE_OF_BLOCK});
+      const finalAmountOfBls = await blsContract.totalSupply();
+      expect(finalAmountOfBls, "42 mio at begining").to.be.equal(bls(42000000));
+    });
+
+    it("should burn 0 of BLS if takeover happens after purchase and just before jump to default BLS burn", async function() {
+      await setupWithBlsDoposit(1000);
+      await blsGiveAndApproveSpace(walletB, 10000); 
+      const initialAmountOfBls = await blsContract.totalSupply();
+      expect(initialAmountOfBls, "42 mio at begining").to.be.equal(bls(42000000));
+      await blocksSpace2Contract.connect(walletA).purchaseBlocksArea("1212", "1212", "imagehash1", 0, {value: PRICE_OF_BLOCK});
+      await mineBlocks(14);
+
+      await blocksSpace2Contract.connect(walletB).purchaseBlocksArea("1212", "1212", "imagehash2", 0, {value: PRICE_OF_BLOCK});
+      const finalAmountOfBls = await blsContract.totalSupply();
+
+      expect(finalAmountOfBls, "42 mio at begining").to.be.equal(bls(42000000));
+    });
+
+    it("should burn some default amount of BLS if purchase happens after 0 time gone", async function() {
+      await setupWithBlsDoposit(1000);
+      await blsGiveAndApproveSpace(walletB, 10000); 
+      const initialAmountOfBls = await blsContract.totalSupply();
+      expect(initialAmountOfBls, "42 mio at begining").to.be.equal(bls(42000000));
+      await blocksSpace2Contract.connect(walletA).purchaseBlocksArea("1212", "1212", "imagehash1", 0, {value: PRICE_OF_BLOCK});
+      await mineBlocks(16);
+
+      const priceOfBlockAreaOnNextBlock = await getPricesOfBlocksArea("1212", "1212", 0);
+      expect(priceOfBlockAreaOnNextBlock, "Should equal to 24").to.be.equal(24);
+      await blocksSpace2Contract.connect(walletB).purchaseBlocksArea("1212", "1212", "imagehash2", priceOfBlockAreaOnNextBlock, {value: PRICE_OF_BLOCK});
+      const finalAmountOfBls = await blsContract.totalSupply();
+
+      // Default BLS burn is 24 BLS
+      expect(finalAmountOfBls, "42 mio at begining").to.be.equal(bls(42000000).sub(24));
+    });
+
+    // it("Setting more than 5% fee should fail", async function() {
+    //   await expect(rewardsManager2Contract.connect(owner).setTreasuryFee(6), "Cannot set more than 5% fee").to.be.reverted;
+    // });
+
+    // it("Setting treasury fee to zero", async function() {
+    //   await rewardsManager2Contract.connect(owner).setTreasuryFee(0);
+    //   let balanceBefore = await ethers.provider.getBalance(owner.address);
+    //   await blocksSpace2Contract.connect(walletB).purchaseBlocksArea("0402", "0402", "imagehash1", 0, {value: PRICE_OF_BLOCK});
+    //   let balanceAfter = await ethers.provider.getBalance(owner.address);
+    //   let diff = balanceAfter.sub(balanceBefore);
+    //   expect(diff, "Treasury should not change").to.equal(10); //Because liqudiity fees are still applied
+    // });
+
   });
 
   describe("Scenario: BNB Rewards distribution", function() {
@@ -315,77 +401,77 @@ describe("Testing BlocksRewardsManager", function() {
 
   });
   
-  // describe("Scenario: Claiming BLS rewards", function() {
+  describe("Scenario: Claiming BLS rewards", function() {
 
-  //   it("Claim all BLS tokens (rewards of user).", async function() {
-  //     await setupWithBlsDoposit(1000);
-  //     await blsContract.transfer(rewardsManager2Contract.address, utils.parseEther("2000"));
+    it("Claim all BLS tokens (rewards of user).", async function() {
+      await setupWithBlsDoposit(1000);
+      await blsContract.transfer(rewardsManager2Contract.address, utils.parseEther("2000"));
 
-  //     let blsBalanceInitial = await blsContract.balanceOf(walletB.address);
+      let blsBalanceInitial = await blsContract.balanceOf(walletB.address);
 
-  //     // A Purchase 4 blocks
-  //     await blocksSpace2Contract.connect(walletB).purchaseBlocksArea("0706", "0807", "imagehash1", {value: 100});
-  //     await mineBlocks(7);
+      // A Purchase 4 blocks
+      await blocksSpace2Contract.connect(walletB).purchaseBlocksArea("0706", "0807", "imagehash1", 0, {value: PRICE_OF_BLOCK*4});
+      await mineBlocks(7);
 
-  //     let pendingTokens = await rewardsManager2Contract.pendingBlsTokens(0, walletB.address);
-  //     expect(pendingTokens, "Owner needs to have BLS_5_PER_BLOCK * 7 * 4 blocks rewards").to.equal(BLS_5_PER_BLOCK * 7 * 4);
+      let pendingTokens = await rewardsManager2Contract.pendingBlsTokens(0, walletB.address);
+      expect(pendingTokens, "Owner needs to have BLS_5_PER_BLOCK * 7 * 4 blocks rewards").to.equal(BLS_5_PER_BLOCK * 7 * 4);
 
-  //     await rewardsManager2Contract.connect(walletB).claim(0);
+      await rewardsManager2Contract.connect(walletB).claim(0);
 
-  //     let blsBalanceAfter = await blsContract.balanceOf(walletB.address);
-  //     expect(blsBalanceAfter.sub(blsBalanceInitial), "Balance needs to be 140 BLS after claim").to.equal(BLS_5_PER_BLOCK * 8 * 4);
+      let blsBalanceAfter = await blsContract.balanceOf(walletB.address);
+      expect(blsBalanceAfter.sub(blsBalanceInitial), "Balance needs to be 140 BLS after claim").to.equal(BLS_5_PER_BLOCK * 8 * 4);
 
-  //     pendingTokens = await rewardsManager2Contract.pendingBlsTokens(0, walletB.address);
-  //     expect(pendingTokens, "After claim pending bls should be 0").to.equal(BLS_5_PER_BLOCK * 0 * 4);
-  //   });
+      pendingTokens = await rewardsManager2Contract.pendingBlsTokens(0, walletB.address);
+      expect(pendingTokens, "After claim pending bls should be 0").to.equal(BLS_5_PER_BLOCK * 0 * 4);
+    });
 
-  // });
+  });
 
-  // describe("Scenario: Proper BLS last rewards calculations", function() {
+  describe("Scenario: Proper BLS last rewards calculations", function() {
 
-  //   it("10 bls rewards, which run out and user properly claims and sees no more pending rewards", async function() {
-  //     await setupWithBlsDoposit(10, 1);
-  //     let blsBalanceAfter = await blsContract.balanceOf(rewardsManager2Contract.address);
-  //     await blocksSpace2Contract.connect(walletA).purchaseBlocksArea("0402", "0402", "imagehash1", {value: 10});
-  //     let block = await ethers.provider.getBlock();
-  //     let blockNr = await rewardsManager2Contract.blsLastRewardsBlock();
-  //     expect(blockNr.toNumber()-block.number, "This rewards need to hold for 10 blocks").to.equal(10);
+    it("10 bls rewards, which run out and user properly claims and sees no more pending rewards", async function() {
+      await setupWithBlsDoposit(10, 1);
+      let blsBalanceAfter = await blsContract.balanceOf(rewardsManager2Contract.address);
+      await blocksSpace2Contract.connect(walletA).purchaseBlocksArea("0402", "0402", "imagehash1", 0, {value: PRICE_OF_BLOCK});
+      let block = await ethers.provider.getBlock();
+      let blockNr = await rewardsManager2Contract.blsLastRewardsBlock();
+      expect(blockNr.toNumber()-block.number, "This rewards need to hold for 10 blocks").to.equal(10);
 
-  //     await mineBlocks(12);
+      await mineBlocks(12);
 
-  //     await rewardsManager2Contract.connect(walletA).claim(0); // Claim everything
-  //     blsBalanceAfter = await blsContract.balanceOf(walletA.address);
-  //     expect(blsBalanceAfter.toNumber(), "Balance needs to be 10 BLS after claim").to.equal(10);
-  //     //Rewards now finished. User should not see anything to claim anymore
-  //     let pendingTokens = await rewardsManager2Contract.pendingBlsTokens(0, walletA.address);
-  //     expect(pendingTokens, "Rewards finished, nothing should be to claim").to.equal(0);
-  //   });
+      await rewardsManager2Contract.connect(walletA).claim(0); // Claim everything
+      blsBalanceAfter = await blsContract.balanceOf(walletA.address);
+      expect(blsBalanceAfter.toNumber(), "Balance needs to be 10 BLS after claim").to.equal(10);
+      //Rewards now finished. User should not see anything to claim anymore
+      let pendingTokens = await rewardsManager2Contract.pendingBlsTokens(0, walletA.address);
+      expect(pendingTokens, "Rewards finished, nothing should be to claim").to.equal(0);
+    });
 
-  //   it("3 purchases, different amounts, different block, last block needs to be properly calculated", async function() {
-  //     // User A at 1 block buys 4 blocks
-  //     // User B at 5 block buys 6 blocks
-  //     // User C at 8 block buys 10 blocks
-  //     // User A need to get 36, user B 30 and user C 20 before rewards run out.
-  //     // 14 BLS stays in contract, because couldnt be divided between all buyers
-  //     await setupWithBlsDoposit(100, 1);
-  //     let initialBlock = await ethers.provider.getBlock();
-  //     await blocksSpace2Contract.connect(walletA).purchaseBlocksArea("0402", "0503", "img1", {value: 10});
-  //     await mineBlocks(3);
-  //     await blocksSpace2Contract.connect(walletB).purchaseBlocksArea("0204", "0405", "img2", {value: 10});
-  //     await mineBlocks(2);
-  //     await blocksSpace2Contract.connect(walletC).purchaseBlocksArea("0600", "1001", "img3", {value: 10});
-  //     let blockNr = await rewardsManager2Contract.blsLastRewardsBlock();
-  //     expect(blockNr.toNumber()-initialBlock.number, "Last reward should be at block 10 after initial buy").to.equal(10);
-  //     await mineBlocks(5); // Push out of last reward
-  //     await rewardsManager2Contract.connect(walletA).claim(0);
-  //     await rewardsManager2Contract.connect(walletB).claim(0);
-  //     await rewardsManager2Contract.connect(walletC).claim(0);
-  //     await expect((await blsContract.balanceOf(walletA.address)).toNumber(), "walletA bls should be").to.equal(36);
-  //     await expect((await blsContract.balanceOf(walletB.address)).toNumber(), "walletB bls should be").to.equal(30);
-  //     await expect((await blsContract.balanceOf(walletC.address)).toNumber(), "walletC bls should be").to.equal(20);
-  //     let blsBalanceAfter = await blsContract.balanceOf(rewardsManager2Contract.address);
-  //     expect(blsBalanceAfter.toNumber(), "Since we couldnt distribute all rewards properly, there are 14 bls left").to.equal(14);
-  //   });
+    it("3 purchases, different amounts, different block, last block needs to be properly calculated", async function() {
+      // User A at 1 block buys 4 blocks
+      // User B at 5 block buys 6 blocks
+      // User C at 8 block buys 10 blocks
+      // User A need to get 36, user B 30 and user C 20 before rewards run out.
+      // 14 BLS stays in contract, because couldnt be divided between all buyers
+      await setupWithBlsDoposit(100, 1);
+      let initialBlock = await ethers.provider.getBlock();
+      await blocksSpace2Contract.connect(walletA).purchaseBlocksArea("0402", "0503", "img1", 0, {value: PRICE_OF_BLOCK*4});
+      await mineBlocks(3);
+      await blocksSpace2Contract.connect(walletB).purchaseBlocksArea("0204", "0405", "img2", 0, {value: PRICE_OF_BLOCK*6});
+      await mineBlocks(2);
+      await blocksSpace2Contract.connect(walletC).purchaseBlocksArea("0600", "1001", "img3", 0, {value: PRICE_OF_BLOCK*10});
+      let blockNr = await rewardsManager2Contract.blsLastRewardsBlock();
+      expect(blockNr.toNumber()-initialBlock.number, "Last reward should be at block 10 after initial buy").to.equal(10);
+      await mineBlocks(5); // Push out of last reward
+      await rewardsManager2Contract.connect(walletA).claim(0);
+      await rewardsManager2Contract.connect(walletB).claim(0);
+      await rewardsManager2Contract.connect(walletC).claim(0);
+      expect((await blsContract.balanceOf(walletA.address)).toNumber(), "walletA bls should be").to.equal(36);
+      expect((await blsContract.balanceOf(walletB.address)).toNumber(), "walletB bls should be").to.equal(30);
+      expect((await blsContract.balanceOf(walletC.address)).toNumber(), "walletC bls should be").to.equal(20);
+      let blsBalanceAfter = await blsContract.balanceOf(rewardsManager2Contract.address);
+      expect(blsBalanceAfter.toNumber(), "Since we couldnt distribute all rewards properly, there are 14 bls left").to.equal(14);
+    });
 
   //   //BUG: IDX-013 Incorrect Condition
   //   it("should distribute all rewards that are in pool, but not more.", async function() {
@@ -795,7 +881,7 @@ describe("Testing BlocksRewardsManager", function() {
   //     expect(pendingTokensC, "C should have 1 bls").to.equal(1);
   //   });
 
-  // });
+  });
   // describe("Scenario: Depositing additional BLS rewards to RewardsManager", function() {
   //   it("Same as previous, but additional deposit of BLS was added later on", async function() {
   //     // User A at 1 block buys 4 blocks

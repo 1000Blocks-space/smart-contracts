@@ -1,4 +1,4 @@
-pragma solidity ^0.8.5;
+pragma solidity 0.8.5;
 //SPDX-License-Identifier: MIT
 
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -12,6 +12,7 @@ contract BlocksRewardsManager2 is Ownable {
         uint256 amount; // How many blocks user owns currently.
         uint256 pendingRewards; // Rewards assigned, but not yet claimed
         uint256 rewardsDebt;
+        uint256 takeoverRewards;
     }
 
     // Info of each blocks.space
@@ -27,10 +28,8 @@ contract BlocksRewardsManager2 is Ownable {
     // Management of splitting rewards
     uint256 constant MAX_TREASURY_FEE = 5;
     uint256 constant MAX_LIQUIDITY_FEE = 10;
-    uint256 constant MAX_PREVIOUS_OWNER_FEE = 50;
     uint256 public treasuryFee = 5;
     uint256 public liquidityFee = 10;
-    uint256 public previousOwnerFee = 25;
 
     address payable public treasury;
     IERC20 public blsToken;
@@ -50,7 +49,6 @@ contract BlocksRewardsManager2 is Ownable {
     event BlsPerBlockAreaPerBlockUpdated(uint256 spaceId, uint256 newAmount);
     event TreasuryFeeSet(uint256 newFee);
     event LiquidityFeeSet(uint256 newFee);
-    event PreviousOwnerFeeSet(uint256 newFee);
     event BlocksStakingContractUpdated(address add);
     event TreasuryWalletUpdated(address newWallet);
     event BlsRewardsForDistributionDeposited(uint256 amount);
@@ -167,8 +165,7 @@ contract BlocksRewardsManager2 is Ownable {
             user.pendingRewards = pendingBlsTokens(spaceId_, buyer_);
         }
         
-        uint256 numberOfBlocksAddedToSpace;        
-        uint256 allPreviousOwnersPaid;
+        uint256 numberOfBlocksAddedToSpace;
         { // Stack too deep scoping
             //remove blocks from previous owners that this guy took over. Max 42 loops
             uint256 numberOfBlocksBought = previousBlockOwners_.length;      
@@ -179,6 +176,7 @@ contract BlocksRewardsManager2 is Ownable {
                     // Calculate previous users pending BLS rewards
                     UserInfo storage prevUser = userInfo[spaceId_][previousBlockOwners_[i]];
                     prevUser.pendingRewards = previousOwnersBlsRewards_[i] + pendingBlsTokens(spaceId_, previousBlockOwners_[i]);
+                    prevUser.takeoverRewards = prevUser.takeoverRewards + previousOwnersBlsRewards_[i];
                     // Remove his ownership of block
                     --prevUser.amount;
                     prevUser.rewardsDebt = prevUser.amount * spaceBlsRewardsAcc;
@@ -204,34 +202,15 @@ contract BlocksRewardsManager2 is Ownable {
         }
 
         // Calculate and subtract fees in first part
-        // In second part, calculate how much rewards are being rewarded to previous block owners
-        (uint256 rewardToForward, uint256[] memory prevOwnersRewards) = calculateAndDistributeFees(
-            msg.value,
-            previousOwnersBlsRewards_,
-            allPreviousOwnersPaid
-        );
+        uint256 rewardToForward = calculateAndDistributeFees(msg.value);
 
         // Send to distribution part
-        blocksStaking.distributeRewards{value: rewardToForward}(previousBlockOwners_, prevOwnersRewards);
+        blocksStaking.distributeRewards{value: rewardToForward}(new address[](0), new uint256[](0));
     }
 
-    function calculateAndDistributeFees(
-        uint256 rewardReceived_,
-        uint256[] calldata previousOwnersBlsRewards_,
-        uint256 previousOwnersPaid_
-    ) internal returns (uint256, uint256[] memory) {
-        uint256 numberOfBlocks = previousOwnersBlsRewards_.length;
+    function calculateAndDistributeFees(uint256 rewardReceived_) internal returns (uint256) {
+
         uint256 feesTaken;
-        uint256 previousOwnersFeeValue;
-        uint256[] memory previousOwnersRewardWei = new uint256[](numberOfBlocks);
-        if (previousOwnerFee > 0 && previousOwnersPaid_ != 0) {
-            previousOwnersFeeValue = (rewardReceived_ * previousOwnerFee) / 100; // Calculate how much is for example 25% of whole rewards gathered
-            uint256 onePartForPreviousOwners = (previousOwnersFeeValue * 1e9) / previousOwnersPaid_; // Then calculate one part for previous owners sum
-            for (uint256 i = 0; i < numberOfBlocks; ++i) {
-                // Now we calculate exactly how much one user gets depending on his investment (it needs to be proportionally)
-                previousOwnersRewardWei[i] = (onePartForPreviousOwners * previousOwnersBlsRewards_[i]) / 1e9;
-            }
-        }
         // Can be max 5%
         if (treasuryFee > 0) {
             uint256 treasuryFeeValue = (rewardReceived_ * treasuryFee) / 100;
@@ -252,7 +231,7 @@ contract BlocksRewardsManager2 is Ownable {
             require(sent, "Failed to send moneyz");
         }
 
-        return (rewardReceived_ - feesTaken, previousOwnersRewardWei);
+        return (rewardReceived_ - feesTaken);
     }
 
     function claim(uint256 spaceId_) external {
@@ -264,6 +243,7 @@ contract BlocksRewardsManager2 is Ownable {
             emit Claim(msg.sender, claimedAmount);
             // This is also kinda check, since if user claims more than eligible, this will revert
             user.pendingRewards = toClaimAmount - claimedAmount;
+            user.takeoverRewards = 0;
             user.rewardsDebt = spaceInfo[spaceId_].blsRewardsAcc * user.amount;
             blsSpacesRewardsClaimed = blsSpacesRewardsClaimed + claimedAmount; // Globally claimed rewards, for proper end distribution calc
         }
@@ -291,12 +271,6 @@ contract BlocksRewardsManager2 is Ownable {
         require(newFee_ <= MAX_LIQUIDITY_FEE);
         liquidityFee = newFee_;
         emit LiquidityFeeSet(newFee_);
-    }
-
-    function setPreviousOwnerFee(uint256 newFee_) external onlyOwner {
-        require(newFee_ <= MAX_PREVIOUS_OWNER_FEE);
-        previousOwnerFee = newFee_;
-        emit PreviousOwnerFeeSet(newFee_);
     }
 
     function updateBlocksStakingContract(address address_) external onlyOwner {
